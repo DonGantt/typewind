@@ -13,7 +13,7 @@ export default defineConfig({
   splitting: false,
   clean: true,
   platform: 'node',
-  external: ['typewind', 'tailwindcss'],
+  external: ['typewind', 'tailwindcss', 'esbuild'],
   format: ['cjs', 'esm'],
   target: 'esnext',
   dts: true,

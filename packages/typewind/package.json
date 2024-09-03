@@ -60,7 +60,7 @@
     "eval": "^0.1.8",
     "lightningcss": "^1.19.0",
     "tailwind-merge": "^2.3.0",
-    "tsup": "^6.5.0"
+    "tsup": "^8.2.4"
   },
   "devDependencies": {
     "@types/babel__core": "^7.20.0",

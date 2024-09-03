@@ -1,7 +1,10 @@
+import _eval from 'eval';
 import path from 'path';
 import resolveConfig from 'tailwindcss/resolveConfig.js';
-import { createContext } from 'tailwindcss/lib/lib/setupContextUtils.js';
+import { buildSync } from 'esbuild';
 import fs from 'fs';
+// @ts-ignore
+import { createContext } from 'tailwindcss/lib/lib/setupContextUtils.js';
 
 export function loadConfig(): {
   configPath: string;
@@ -23,6 +26,7 @@ function getConfigPath() {
 
   for (const configFile of [
     config.configPath,
+    './tailwind.config.ts',
     './tailwind.config.js',
     './tailwind.config.cjs',
   ]) {
@@ -40,7 +44,32 @@ function getConfigPath() {
 
 export function createTypewindContext() {
   const configFile = getConfigPath();
-  const userConfig = resolveConfig(require(configFile!));
+  let pkgJSON;
+
+  try {
+    pkgJSON = require(path.join(process.cwd(), 'package.json'));
+  } catch {
+    pkgJSON = {};
+  }
+
+  let config: any;
+  if (configFile.endsWith('.ts')) {
+    const preprocessedConfig = buildSync({
+      entryPoints: [configFile],
+      write: false,
+      bundle: true,
+      format: 'cjs',
+      target: 'node14',
+      platform: 'node',
+      external: ['node_modules/*'],
+    }).outputFiles[0].text;
+
+    config = _eval(preprocessedConfig, true) as any;
+  } else {
+    config = require(configFile);
+  }
+
+  const userConfig = resolveConfig(config);
 
   return createContext(userConfig);
 }
