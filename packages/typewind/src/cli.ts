@@ -2,89 +2,165 @@
 
 import fs from 'fs';
 import path from 'path';
-import { transform } from 'lightningcss';
 import { createTypewindContext, loadConfig } from './utils';
 
-function createDoc(doc: string) {
-  try {
-    let cssDoc = `
-    * \`\`\`css
-    * ${transform({
-      filename: 'doc.css',
-      code: Buffer.from(doc),
-    })
-      .code.toString()
-      .replace(/\n/g, '\n    * ')}
-    * \`\`\`
-  `;
-    const config = loadConfig();
-    if (config.showPixelEquivalents) {
-      const remMatch = doc.match(/-?[0-9.]+rem/g);
-      const pxValue = config.rootFontSize;
-      if (remMatch) {
-        cssDoc = cssDoc.replace(
-          /(-?[0-9.]+)rem/g,
-          // There is a zero-width space between * and / in the closing comment
-          // without which typescript closes the tsdoc comment
-          (match, p1) => `${match} /* ${parseFloat(p1) * pxValue}px *​/`
-        );
-      }
-    }
-    return cssDoc;
-  } catch (error) {
-    return doc;
-  }
+// Utility families that support arbitrary values (tw.bg_.['#123'] → bg-[#123])
+// These populate the Arbitrary type's _-suffixed properties.
+const ARBITRARY_FAMILIES = [
+  // Colors
+  'bg', 'text', 'border', 'border-t', 'border-r', 'border-b', 'border-l',
+  'border-x', 'border-y', 'border-s', 'border-e',
+  'ring', 'ring-offset', 'fill', 'stroke', 'outline', 'caret', 'accent',
+  'decoration', 'from', 'via', 'to', 'divide', 'placeholder',
+  // Spacing
+  'p', 'px', 'py', 'pt', 'pr', 'pb', 'pl', 'ps', 'pe',
+  'm', 'mx', 'my', 'mt', 'mr', 'mb', 'ml', 'ms', 'me',
+  'gap', 'gap-x', 'gap-y', 'space-x', 'space-y',
+  // Sizing
+  'w', 'h', 'size', 'min-w', 'max-w', 'min-h', 'max-h', 'basis',
+  // Positioning
+  'inset', 'inset-x', 'inset-y', 'top', 'right', 'bottom', 'left', 'start', 'end',
+  // Typography
+  'font', 'tracking', 'leading', 'indent',
+  'text-shadow',
+  // Transforms
+  'translate-x', 'translate-y', 'translate-z',
+  'rotate', 'rotate-x', 'rotate-y', 'rotate-z',
+  'scale', 'scale-x', 'scale-y', 'scale-z',
+  'skew-x', 'skew-y',
+  // Effects
+  'opacity', 'shadow', 'shadow-color', 'drop-shadow',
+  'blur', 'brightness', 'contrast', 'grayscale', 'hue-rotate',
+  'invert', 'saturate', 'sepia',
+  'backdrop-blur', 'backdrop-brightness', 'backdrop-contrast',
+  'backdrop-grayscale', 'backdrop-hue-rotate', 'backdrop-invert',
+  'backdrop-opacity', 'backdrop-saturate', 'backdrop-sepia',
+  // Border radius
+  'rounded', 'rounded-t', 'rounded-r', 'rounded-b', 'rounded-l',
+  'rounded-tl', 'rounded-tr', 'rounded-br', 'rounded-bl',
+  'rounded-ss', 'rounded-se', 'rounded-ee', 'rounded-es',
+  // Flex/Grid
+  'z', 'order', 'grow', 'shrink', 'flex', 'columns',
+  'col-start', 'col-end', 'col-span', 'row-start', 'row-end', 'row-span',
+  // Scroll
+  'scroll-m', 'scroll-mx', 'scroll-my', 'scroll-mt', 'scroll-mr',
+  'scroll-mb', 'scroll-ml', 'scroll-ms', 'scroll-me',
+  'scroll-p', 'scroll-px', 'scroll-py', 'scroll-pt', 'scroll-pr',
+  'scroll-pb', 'scroll-pl', 'scroll-ps', 'scroll-pe',
+  // Animation
+  'animate', 'duration', 'delay', 'ease',
+  // Outline
+  'outline-offset',
+  // Perspective
+  'perspective',
+];
+
+const fmtToTypewind = (s: string) =>
+  s.replace(/-/g, '_').replace(/^\@/, '$');
+
+const fmtToTailwind = (s: string) =>
+  s.replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
+
+function isValidIdentifier(s: string): boolean {
+  return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s);
 }
 
-const fmtToTypewind = (s: string) => s.replace(/-/g, '_').replace(/^\@/, '$');
+type ClassEntry = [string, { modifiers?: string[] }];
 
-const objectTemplate = (
-  props: { prop: string; type: string; doc?: string }[]
-) => {
-  return `{${props
-    .map(
-      ({ prop, type, doc }) =>
-        `/** ${doc ? createDoc(doc) : ''} */ ${JSON.stringify(prop)}: ${type};`
-    )
-    .join('\n')}}`;
+function processClassList(classList: ClassEntry[]): {
+  standard: { prop: string; isColor: boolean }[];
+  colorProps: Set<string>;
+} {
+  const standard: { prop: string; isColor: boolean }[] = [];
+  const colorProps = new Set<string>();
+  const seen = new Set<string>();
+
+  for (const [name, meta] of classList) {
+    // Skip classes with special characters (arbitrary/fractional/dot-decimal)
+    if (/[.\[\/()]/.test(name)) continue;
+
+    let prop: string;
+    if (name.startsWith('-')) {
+      // Negative values: -mx-4 → _mx_4
+      prop = fmtToTypewind(name);
+    } else {
+      prop = fmtToTypewind(name);
+    }
+
+    // Skip if not a valid TS identifier
+    if (!isValidIdentifier(prop) || seen.has(prop)) continue;
+    seen.add(prop);
+
+    const hasNumericModifiers =
+      meta.modifiers &&
+      meta.modifiers.length > 0 &&
+      meta.modifiers.some((m) => /^\d+$/.test(m));
+
+    if (hasNumericModifiers) {
+      colorProps.add(prop);
+    }
+
+    standard.push({ prop, isColor: !!hasNumericModifiers });
+  }
+
+  return { standard, colorProps };
+}
+
+function buildTypeContent(
+  standardClasses: { prop: string; isColor: boolean }[],
+  variantNames: string[],
+  opacityValues: string[]
+): string {
+  const opacityType =
+    opacityValues.length > 0
+      ? opacityValues.map((v) => JSON.stringify(v)).join(' | ')
+      : 'string';
+
+  const colorModifierMap = `{ [K in ${opacityType}]: Property } & Record<string, Property>`;
+
+  // Build Standard type: all specific classes
+  const standardProps = standardClasses
+    .map(({ prop, isColor }) => {
+      const baseType = `"${prop}": Property`;
+      if (isColor) {
+        return `${baseType}; "${prop}$": ${colorModifierMap}`;
+      }
+      return baseType;
+    })
+    .join(';\n  ');
+
+  // Build Arbitrary type: utility families that support arbitrary values
+  const arbitraryProps = ARBITRARY_FAMILIES.map((family) => {
+    const prop = fmtToTypewind(family) + '_';
+    return `"${prop}": Record<string, Property>`;
+  }).join(';\n  ');
+
+  // Build modifier methods
+  const modifierMethods = variantNames
+    .filter((name) => !['*', '**'].includes(name))
+    .map((name) => {
+      let prop = fmtToTypewind(name);
+      // Prefix digit-starting names with _
+      prop = /^\d/.test(prop) ? `_${prop}` : prop;
+      if (!isValidIdentifier(prop)) return null;
+      return `${prop}(style: Property): Property`;
+    })
+    .filter(Boolean)
+    .join(';\n  ');
+
+  return `type Property = Typewind & string;
+
+type Standard = {
+  ${standardProps}
 };
 
-const typeTemplate = (
-  name: string,
-  props: { prop: string; type: string; doc?: string }[]
-) => `
-type ${name} = ${objectTemplate(props)}
-`;
+type Arbitrary = {
+  ${arbitraryProps}
+};
 
-const rootTypeTemplate = ({
-  others,
-  types,
-  modifiers,
-  colors,
-}: {
-  others: string[];
-  types: string[];
-  modifiers: string[];
-  colors: string[];
-}) =>
-  `type Property = Typewind & string;
-
-${others.join('\n')}
-
-type OpacityMap = {
-  [K in Opacity]: Property;
-} & Record<string, Property>;
-type Colors = {
-  ${colors.map((color) => `${color}: OpacityMap`).join(';\n')}
-}
-
-type Typewind = ${types.join(' & ')} & {
-  ${modifiers
-    .map((variant) => `${variant}(style: Property): Property`)
-    .join(';\n')}
-} & {
-  // [arbitraryVariant: string]: (style: Property) => Property;
-} & {
+type Typewind = Standard & Arbitrary & {
+  ${modifierMethods};
+  important(style: Property): Property;
   variant<T extends \`&\${string}\` | \`@\${string}\`>(variant: T, style: Property | string): Property;
   raw(style: string): Property;
 }
@@ -93,206 +169,66 @@ declare const tw: Typewind;
 
 export { tw };
 `;
-
-function getCandidateItem(
-  map: Map<string, any>,
-  name: string,
-  rest: string | undefined = undefined
-): { rule: any; rest: string | undefined } {
-  let rule = map.get(name);
-
-  if (!rule && name.includes('-')) {
-    const arr = name.split('-');
-    const key = arr.slice(0, arr.length - 1).join('-');
-    return getCandidateItem(
-      map,
-      key,
-      [arr[arr.length - 1], rest].filter(Boolean).join('-')
-    );
-  }
-
-  return { rule, rest };
 }
 
 export async function generateTypes() {
-  const ctx = createTypewindContext();
+  const config = loadConfig();
+  const ctx = await createTypewindContext();
 
-  // only exists to generate rule-map for swc plugin
-  // const candidateRuleMap = ctx.candidateRuleMap;
+  const classList = ctx.getClassList() as ClassEntry[];
+  const { standard: standardClasses } = processClassList(classList);
 
-  // const candidateObj = Object.fromEntries(
-  //   [...candidateRuleMap.entries()]
-  //     .map(([k, rules]) => {
-  //       return [
-  //         k,
-  //         rules
-  //           .filter(
-  //             ([rule]: any) => rule.options?.values
-  //             // rule.options?.values.every1((v: any) => typeof v === 'string')
-  //           )
-  //           .map(([rule]: any) => Object.keys(rule.options?.values)),
-  //       ];
-  //     })
-  //     .filter(([k, v]) => v.length > 0)
-  // );
+  const rawVariants = ctx.getVariants() as {
+    name: string;
+    values: string[];
+    isArbitrary: boolean;
+  }[];
+  const variantNames = rawVariants.map((v) => v.name);
 
-  // fs.writeFileSync('./map.json', JSON.stringify(candidateObj));
+  // Expand the container-query `@` variant with common breakpoint sizes
+  const containerSizes = rawVariants
+    .find((v) => v.name === '@')
+    ?.values?.filter((v) => /^(xs|sm|md|lg|xl|2xl|3xs|2xs|3xl)$/.test(v)) ?? [
+    'xs', 'sm', 'md', 'lg', 'xl', '2xl',
+  ];
+  const containerVariants = containerSizes.flatMap((size) => [
+    `@${size}`,
+    `@max-${size}`,
+    `@min-${size}`,
+  ]);
 
-  const classList = ctx.getClassList() as string[];
+  const variants = [...new Set([...variantNames, ...containerVariants])];
 
-  const opacityMap = ctx.tailwindConfig.theme.opacity;
-  const flatColorsList: string[] = [];
-
-  for (const [k, v] of Object.entries(ctx.tailwindConfig.theme.colors)) {
-    if (typeof v === 'object') {
-      for (const col in v) {
-        flatColorsList.push(k + '-' + col);
+  // Extract opacity scale from modifier values on color classes
+  const opacityValues: string[] = [];
+  {
+    const opacitySet = new Set<string>();
+    for (const [, meta] of classList) {
+      if (!meta.modifiers) continue;
+      for (const m of meta.modifiers) {
+        if (/^\d+$/.test(m)) opacitySet.add(m);
       }
-    } else {
-      flatColorsList.push(k);
     }
+    opacityValues.push(...[...opacitySet].sort((a, b) => Number(a) - Number(b)));
   }
 
-  const classesWithStandardSyntax = classList.filter((s) => !/\.|\//.test(s));
-  const classesWithCandidateItem = classesWithStandardSyntax.map((s) => {
-    return [s, getCandidateItem(ctx.candidateRuleMap, s)] as const;
-  });
+  const typeContent = buildTypeContent(standardClasses, variants, opacityValues);
 
-  const colorSet = new Set<string>();
-  const standard = typeTemplate(
-    'Standard',
-    classesWithCandidateItem.map(([s, { rule: rules, rest }]) => {
-      let css = '';
+  const typewindDistDir = path.dirname(require.resolve('typewind'));
 
-      if (rules) {
-        for (const rule of rules) {
-          const [info, ruleOrFn] = rule;
+  fs.writeFileSync(path.join(typewindDistDir, 'index.d.ts'), typeContent, 'utf8');
 
-          if (typeof ruleOrFn === 'function') {
-            const types = info.options.types;
-            const isColor = types.some(
-              (t: Record<string, string>) => t.type == 'color'
-            );
-
-            if (isColor && rest && flatColorsList.includes(rest)) {
-              const key = fmtToTypewind(s) + '$';
-
-              colorSet.add(key);
-            }
-
-            const [ruleSet] = ruleOrFn(rest ?? 'DEFAULT', {});
-            if (ruleSet) {
-              css += fmtRuleToCss(ruleSet);
-            }
-          }
-          if (typeof ruleOrFn == 'object') {
-            css += fmtNode(ruleOrFn) + '\n';
-          }
-        }
-      }
-
-      return { prop: fmtToTypewind(s), type: 'Property', doc: css };
-    })
-  );
-  const candidates = [...ctx.candidateRuleMap.entries()];
-  const arbitraryStyles = [];
-  for (const [name, rules] of candidates) {
-    const ident = fmtToTypewind(name) + '_';
-    const styles: string[] = [];
-
-    for (const [rule, fn] of rules) {
-      if (
-        !rule.options ||
-        !rule.options.values ||
-        Object.keys(rule.options.values).length == 0
-      )
-        continue;
-
-      styles.push(
-        objectTemplate(
-          Object.keys(rule.options.values).map((val) => {
-            const [ruleSet] = fn(val, {});
-
-            return {
-              prop: val,
-              type: 'Property',
-              doc: fmtRuleToCss(ruleSet),
-            };
-          })
-        )
-      );
-    }
-
-    arbitraryStyles.push({
-      prop: ident,
-      type: styles.join(' & ') + ' & Record<string, Property>',
-      doc: undefined,
-    });
-  }
-
-  const arbitrary = typeTemplate('Arbitrary', arbitraryStyles);
-
-  const modifiers = [...ctx.variantMap.keys(), 'important']
-  // Remove * from the list of modifiers to avoid syntax error
-  .filter((s) => s !== '*')
-  .map((s) => {
-    s = /^\d/.test(s) ? `_${s}` : s;
-
-    return fmtToTypewind(s);
-  });
-
-  const root = rootTypeTemplate({
-    others: [
-      standard,
-      arbitrary,
-      `type Opacity = ${Object.keys(opacityMap)
-        .map((k) => JSON.stringify(k))
-        .join(' | ')}`,
-    ],
-    types: ['Standard', 'Arbitrary', 'Colors'],
-    modifiers,
-    colors: [...colorSet].map((k) => JSON.stringify(k)),
-  });
-
+  // Write metadata for evaluate.ts to use at Babel transform time
+  const metadata = { variants };
   fs.writeFileSync(
-    path.join(require.resolve('typewind'), '../index.d.ts'),
-    root,
+    path.join(typewindDistDir, '_metadata.json'),
+    JSON.stringify(metadata),
     'utf8'
   );
-}
 
-function fmtRuleset(rule: any) {
-  return (
-    '{' +
-    Object.entries(rule)
-      .map(([prop, value]): any => {
-        if (!value) return '';
-        if (typeof value === 'object') return `${prop} ${fmtRuleset(value)}`;
-
-        return `${prop}: ${value}`;
-      })
-      .join(';') +
-    '}'
+  console.log(
+    `✓ Generated ${standardClasses.length} type definitions with ${variants.length} variants`
   );
-}
-
-function fmtNode(node: any) {
-  if (node.type === 'atrule') {
-    return `\\@${node.name} ${node.params} {${node.nodes
-      .map(fmtNode)
-      .join('')}}`;
-  }
-  if (node.type === 'decl') {
-    return `${node.prop}: ${node.value};`;
-  }
-  if (node.type === 'rule') {
-    return `${node.selector} {${node.nodes.map(fmtNode).join('')}}`;
-  }
-}
-
-function fmtRuleToCss(ruleSet: any) {
-  const selector = Object.keys(ruleSet)[0];
-  return `${selector} ${fmtRuleset(ruleSet[selector])}`;
 }
 
 generateTypes().catch((err) => {

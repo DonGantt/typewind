@@ -1,16 +1,14 @@
 {
   "name": "typewind",
-  "version": "0.3.0",
-  "description": "The safety of Typescript with the magic of Tailwind.",
+  "version": "1.0.0",
+  "description": "The safety of TypeScript with the magic of Tailwind. Supports Tailwind v4.",
   "types": "dist/index.d.ts",
   "main": "dist/index.js",
   "homepage": "https://typewind.dev",
   "scripts": {
-    "build": "npm run build:tsup && npm run build:cargo",
-    "build:tsup": "tsup",
-    "watch": "npm run build -- --watch",
-    "release": "release-it",
-    "build:cargo": "cargo build-wasi --release && cp target/wasm32-wasip1/release/typewind_swc.wasm dist"
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "release": "release-it"
   },
   "repository": {
     "type": "git",
@@ -36,16 +34,20 @@
       "types": "./dist/babel.d.ts",
       "default": "./dist/babel.js"
     },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "default": "./dist/vite.js"
+    },
     "./transform": {
       "types": "./dist/transform.d.ts",
       "default": "./dist/transform.js"
-    },
-    "./swc": "./dist/typewind_swc.wasm"
+    }
   },
   "keywords": [
     "typescript",
     "tailwind",
     "tailwindcss",
+    "tailwind-v4",
     "babel-plugin",
     "zero-runtime"
   ],
@@ -65,6 +67,9 @@
   "devDependencies": {
     "@types/babel__core": "^7.20.0",
     "release-it": "^17.8.0",
-    "tailwindcss": "^3.4.14"
+    "tailwindcss": "^4.0.0"
+  },
+  "peerDependencies": {
+    "tailwindcss": "^4.0.0"
   }
 }

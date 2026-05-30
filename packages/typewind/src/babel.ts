@@ -1,16 +1,15 @@
 import { NodePath, PluginObj, PluginPass, types as t } from '@babel/core';
 import _eval from 'eval';
-import { createTypewindContext } from './utils';
 import generator from '@babel/generator';
 
-export default function headingBabelPlugin(): PluginObj<
+export default function typewindBabelPlugin(): PluginObj<
   PluginPass & { classes: string[] }
 > {
   const nodesReplaced = new Set<any>();
 
   return {
     name: 'typewind',
-    pre(state) {
+    pre() {
       this.classes ??= [];
     },
     visitor: {
@@ -18,7 +17,6 @@ export default function headingBabelPlugin(): PluginObj<
         if (
           !t.isIdentifier(path.node.object) ||
           path.node.object.name !== 'tw'
-          // !t.isIdentifier(path.node.property)
         )
           return;
 
@@ -60,7 +58,6 @@ try {
 
         if (prevPath.node && !t.isStringLiteral(prevPath.node)) {
           nodesReplaced.add(prevPath.node);
-          // ignore this 👍
           try {
             prevPath.replaceWith(t.stringLiteral(result));
           } catch {}
@@ -68,4 +65,29 @@ try {
       },
     },
   };
+}
+
+export function transformBabel(ext: string, content: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const babel = require('@babel/core') as typeof import('@babel/core');
+
+  const config: import('@babel/core').TransformOptions = {
+    filename: `typewind.${ext}`,
+    plugins: ['typewind/babel'],
+  };
+
+  if (ext === 'ts' || ext === 'tsx') {
+    config.presets = ['@babel/preset-typescript'];
+  }
+  if (ext === 'js' || ext === 'jsx') {
+    config.plugins?.push('@babel/plugin-syntax-jsx');
+  }
+
+  const res = babel.transformSync(content, config);
+
+  if (res?.code == undefined) {
+    throw new Error('Failed to transform file');
+  }
+
+  return res.code;
 }

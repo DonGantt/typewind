@@ -1,5 +1,5 @@
 // @ts-ignore
-import { transformBabel } from 'typewind/transform';
+import { transformBabel } from 'typewind/babel';
 import * as glob from 'glob';
 import * as path from 'path';
 import * as fs from 'fs';

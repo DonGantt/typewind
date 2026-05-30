@@ -1,5 +1,4 @@
 import { defineConfig } from 'tsup';
-import { createRequire } from 'module';
 
 export default defineConfig({
   entry: [
@@ -8,12 +7,13 @@ export default defineConfig({
     'src/babel.ts',
     'src/evaluate.ts',
     'src/transform.ts',
+    'src/vite.ts',
     'src/cn.ts',
   ],
   splitting: false,
   clean: true,
   platform: 'node',
-  external: ['typewind', 'tailwindcss', 'esbuild'],
+  external: ['typewind', 'tailwindcss', 'esbuild', 'vite'],
   format: ['cjs', 'esm'],
   target: 'esnext',
   dts: true,

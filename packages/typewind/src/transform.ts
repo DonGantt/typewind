@@ -1,33 +1,21 @@
-// @ts-nocheck
+// DEPRECATED: typewind/transform is not supported with Tailwind v4.
+// Use the Vite plugin instead:
+//
+//   import { typewindVitePlugin } from 'typewind/vite'
+//
+// In vite.config.ts:
+//   plugins: [typewindVitePlugin(), ...]
+//
+// The content.transform API was removed in Tailwind v4.
+// See the migration guide for details.
 
-import * as babel from '@babel/core';
-import { TransformerFn } from 'tailwindcss/types/config';
+if (typeof process !== 'undefined') {
+  console.warn(
+    '[typewind] typewind/transform is deprecated and has no effect with Tailwind v4.\n' +
+      'Remove it from your tailwind.config and use the Vite plugin instead:\n' +
+      '  import { typewindVitePlugin } from "typewind/vite"\n'
+  );
+}
 
-export const transformBabel = (ext: string, content: string) => {
-  const config: babel.TransformOptions = {
-    filename: `typewind.${ext}`,
-    plugins: ['typewind/babel'],
-  };
-  if (ext === 'ts' || ext === 'tsx') {
-    config.presets = ['@babel/preset-typescript'];
-  }
-
-  if (ext === 'js' || ext === 'jsx') {
-    config.plugins?.push('@babel/plugin-syntax-jsx');
-  }
-
-  const res = babel.transformSync(content, config);
-
-  if (res?.code == undefined) {
-    throw new Error('Failed to transform file');
-  }
-
-  return res.code;
-};
-
-export const typewindTransforms: Record<string, TransformerFn> = {
-  tsx: (content) => transformBabel('tsx', content),
-  ts: (content) => transformBabel('ts', content),
-  jsx: (content) => transformBabel('jsx', content),
-  js: (content) => transformBabel('js', content),
-};
+export const typewindTransforms: Record<string, never> = {} as Record<string, never>;
+export const transformBabel = undefined;
