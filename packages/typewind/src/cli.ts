@@ -226,8 +226,13 @@ export async function generateTypes() {
 
   fs.writeFileSync(path.join(typewindDistDir, 'index.d.ts'), typeContent, 'utf8');
 
-  // Write metadata for evaluate.ts to use at Babel transform time
-  const metadata = { variants };
+  // Named class set for smart arbitrary value lookup in evaluate.ts.
+  // Excludes arbitrary/fractional/decimal classes (the ones with [ . / ()).
+  const namedClassSet = classList
+    .filter(([name]) => !/[.\[\/()]/.test(name))
+    .map(([name]) => name);
+
+  const metadata = { variants, classSet: namedClassSet };
   fs.writeFileSync(
     path.join(typewindDistDir, '_metadata.json'),
     JSON.stringify(metadata),

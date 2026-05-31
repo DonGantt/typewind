@@ -50,6 +50,7 @@ const DEFAULT_VARIANTS = new Set([
 ]);
 
 let variants = DEFAULT_VARIANTS;
+let knownClasses = new Set<string>();
 
 try {
   const fs = require('fs');
@@ -60,9 +61,12 @@ try {
     if (meta.variants && Array.isArray(meta.variants)) {
       variants = new Set([...DEFAULT_VARIANTS, ...meta.variants]);
     }
+    if (meta.classSet && Array.isArray(meta.classSet)) {
+      knownClasses = new Set(meta.classSet);
+    }
   }
 } catch {
-  // Use DEFAULT_VARIANTS
+  // Use DEFAULT_VARIANTS, empty knownClasses
 }
 
 const fmtToTailwind = (s: string) =>
@@ -87,9 +91,11 @@ export const createTw: any = () => {
         const name = fmtToTailwind(p);
 
         if (t.prevProp?.endsWith('-')) {
-          // Arbitrary value mode: always wrap in []
           const base = t.prevProp.slice(0, -1);
-          t.classes.add(`${base}-[${p}]`);
+          const namedClass = `${base}-${p}`;
+          // Use the named Tailwind class when it exists; otherwise treat as
+          // an arbitrary CSS value and wrap in brackets.
+          t.classes.add(knownClasses.has(namedClass) ? namedClass : `${base}-[${p}]`);
         } else if (t.prevProp?.endsWith('/')) {
           // Opacity modifier mode
           t.classes.add(`${t.prevProp}${name}`);
