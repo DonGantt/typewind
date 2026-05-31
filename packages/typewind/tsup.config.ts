@@ -14,6 +14,7 @@ export default defineConfig({
   clean: true,
   platform: 'node',
   external: ['typewind', 'tailwindcss', 'esbuild', 'vite'],
+  noExternal: ['eval'],
   format: ['cjs', 'esm'],
   target: 'esnext',
   dts: true,

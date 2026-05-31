@@ -53,6 +53,8 @@ try {
   )}. \${error}\`)
 }
 `,
+          __filename,
+          {},
           true
         ) as { result: string };
 
