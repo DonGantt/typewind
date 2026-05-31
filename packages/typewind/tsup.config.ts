@@ -9,6 +9,7 @@ export default defineConfig({
     'src/transform.ts',
     'src/vite.ts',
     'src/cn.ts',
+    'src/runtime.ts',
   ],
   splitting: false,
   clean: true,

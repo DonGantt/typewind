@@ -3,6 +3,25 @@ const fmtToTailwind = (s: string) =>
 
 type ToStringable = { toString(): string };
 
+// Named Tailwind class set for smart arbitrary-value lookup.
+// Loaded from _metadata.json in Node/SSR; stays empty in the browser.
+let knownClasses = new Set<string>();
+try {
+  if (typeof require !== 'undefined' && typeof __dirname !== 'undefined') {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const _fs = require('fs') as typeof import('fs');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const _path = require('path') as typeof import('path');
+    const metaPath = _path.join(__dirname, '_metadata.json');
+    if (_fs.existsSync(metaPath)) {
+      const meta = JSON.parse(_fs.readFileSync(metaPath, 'utf8'));
+      if (Array.isArray(meta.classSet)) knownClasses = new Set(meta.classSet);
+    }
+  }
+} catch {
+  // browser environment or missing metadata — always-bracket fallback
+}
+
 export const typewind_id = Symbol.for('typewind_style');
 
 export function createRuntimeTw() {
@@ -51,7 +70,9 @@ export function createRuntimeTw() {
         const name = fmtToTailwind(p);
 
         if (target.prevProp?.endsWith('-')) {
-          target.classes.add(`${target.prevProp.slice(0, -1)}-[${p}]`);
+          const base = target.prevProp.slice(0, -1);
+          const namedClass = `${base}-${p}`;
+          target.classes.add(knownClasses.has(namedClass) ? namedClass : `${base}-[${p}]`);
         } else if (target.prevProp?.endsWith('/')) {
           target.classes.add(`${target.prevProp}${name}`);
         } else if (!name.endsWith('-') && !name.endsWith('/')) {
