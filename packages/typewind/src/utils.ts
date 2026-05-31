@@ -75,6 +75,18 @@ function findTailwindPkgDir(): string {
   return path.dirname(require.resolve('tailwindcss/package.json'));
 }
 
+async function loadModule(id: string, base: string) {
+  try {
+    const resolved = require.resolve(id, { paths: [base, process.cwd()] });
+    const mod = require(resolved);
+    return { module: mod, base: path.dirname(resolved) };
+  } catch {
+    throw new Error(
+      `Typewind: Could not resolve @plugin '${id}'. Is it installed in your project?`
+    );
+  }
+}
+
 function makeStylesheetLoader(tailwindPkgDir: string) {
   return async function loadStylesheet(id: string, base: string) {
     // Resolve tailwindcss package imports (e.g. @import "tailwindcss")
@@ -128,6 +140,7 @@ export async function createTypewindContext() {
   return await __unstable__loadDesignSystem(cssContent, {
     base,
     loadStylesheet: makeStylesheetLoader(tailwindPkgDir),
+    loadModule,
   });
 }
 
@@ -136,5 +149,6 @@ export async function createTypewindContextFromCss(css: string, base: string) {
   return await __unstable__loadDesignSystem(css, {
     base,
     loadStylesheet: makeStylesheetLoader(tailwindPkgDir),
+    loadModule,
   });
 }
