@@ -58,7 +58,7 @@ try {
   if (fs.existsSync(metaPath)) {
     const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
     if (meta.variants && Array.isArray(meta.variants)) {
-      variants = new Set(meta.variants);
+      variants = new Set([...DEFAULT_VARIANTS, ...meta.variants]);
     }
   }
 } catch {

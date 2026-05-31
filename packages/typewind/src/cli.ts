@@ -197,7 +197,15 @@ export async function generateTypes() {
     `@min-${size}`,
   ]);
 
-  const variants = [...new Set([...variantNames, ...containerVariants])];
+  // Expand peer-* and group-* compound variants from their values lists
+  const peerValues = rawVariants.find((v) => v.name === 'peer')?.values ?? [];
+  const groupValues = rawVariants.find((v) => v.name === 'group')?.values ?? [];
+  const peerGroupVariants = [
+    ...peerValues.map((v) => `peer-${v}`),
+    ...groupValues.map((v) => `group-${v}`),
+  ];
+
+  const variants = [...new Set([...variantNames, ...containerVariants, ...peerGroupVariants])];
 
   // Extract opacity scale from modifier values on color classes
   const opacityValues: string[] = [];
