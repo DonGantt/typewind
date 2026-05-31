@@ -226,10 +226,13 @@ export async function generateTypes() {
 
   fs.writeFileSync(path.join(typewindDistDir, 'index.d.ts'), typeContent, 'utf8');
 
-  // Named class set for smart arbitrary value lookup in evaluate.ts.
-  // Excludes arbitrary/fractional/decimal classes (the ones with [ . / ()).
+  // Named class set for smart arbitrary value lookup in evaluate.ts / runtime.ts.
+  // Excludes actual arbitrary values ([...]) and opacity fractions (/), but
+  // KEEPS decimal spacing classes like px-1.5, py-0.5 — these are valid named
+  // Tailwind utilities that the type generator skips (can't be TS identifiers)
+  // but the runtime must recognise as named, not arbitrary.
   const namedClassSet = classList
-    .filter(([name]) => !/[.\[\/()]/.test(name))
+    .filter(([name]) => !/[\[\/()]/.test(name))
     .map(([name]) => name);
 
   const metadata = { variants, classSet: namedClassSet };
