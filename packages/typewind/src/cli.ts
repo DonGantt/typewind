@@ -2,7 +2,34 @@
 
 import fs from 'fs';
 import path from 'path';
+import { transform } from 'lightningcss';
 import { createTypewindContext, loadConfig } from './utils';
+
+function createDoc(css: string, showPixelEquivalents: boolean, rootFontSize: number): string {
+  try {
+    let formatted = transform({
+      filename: 'doc.css',
+      code: Buffer.from(css),
+    }).code.toString()
+      // Zero-width space prevents premature TSDoc comment close
+      .replace(/\*\//g, '*​/');
+
+    if (showPixelEquivalents) {
+      formatted = formatted.replace(
+        /(-?[0-9.]+)rem/g,
+        (match, p1) => `${match} /* ${parseFloat(p1) * rootFontSize}px *​/`
+      );
+    }
+
+    return `
+    * \`\`\`css
+    * ${formatted.replace(/\n/g, '\n    * ')}
+    * \`\`\`
+  `;
+  } catch {
+    return '';
+  }
+}
 
 // Utility families that support arbitrary values (tw.bg_.['#123'] → bg-[#123])
 // These populate the Arbitrary type's _-suffixed properties.
@@ -109,7 +136,10 @@ function processClassList(classList: ClassEntry[]): {
 function buildTypeContent(
   standardClasses: { prop: string; isColor: boolean }[],
   variantNames: string[],
-  opacityValues: string[]
+  opacityValues: string[],
+  cssMap: Map<string, string>,
+  showPixelEquivalents: boolean,
+  rootFontSize: number
 ): string {
   const opacityType =
     opacityValues.length > 0
@@ -121,7 +151,9 @@ function buildTypeContent(
   // Build Standard type: all specific classes
   const standardProps = standardClasses
     .map(({ prop, isColor }) => {
-      const baseType = `"${prop}": Property`;
+      const css = cssMap.get(prop);
+      const doc = css ? `/** ${createDoc(css, showPixelEquivalents, rootFontSize)} */\n  ` : '';
+      const baseType = `${doc}"${prop}": Property`;
       if (isColor) {
         return `${baseType}; "${prop}$": ${colorModifierMap}`;
       }
@@ -220,7 +252,23 @@ export async function generateTypes() {
     opacityValues.push(...[...opacitySet].sort((a, b) => Number(a) - Number(b)));
   }
 
-  const typeContent = buildTypeContent(standardClasses, variants, opacityValues);
+  // Batch-fetch CSS for all standard classes for hover tooltips
+  const twClassNames = standardClasses.map(({ prop }) => fmtToTailwind(prop));
+  const cssResults = ctx.candidatesToCss(twClassNames) as (string | null)[];
+  const cssMap = new Map<string, string>();
+  for (let i = 0; i < standardClasses.length; i++) {
+    const css = cssResults[i];
+    if (css) cssMap.set(standardClasses[i].prop, css);
+  }
+
+  const typeContent = buildTypeContent(
+    standardClasses,
+    variants,
+    opacityValues,
+    cssMap,
+    config.showPixelEquivalents,
+    config.rootFontSize,
+  );
 
   const typewindDistDir = path.dirname(require.resolve('typewind'));
 
