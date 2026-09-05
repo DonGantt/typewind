@@ -359,6 +359,10 @@ var fmtToTailwind = (s) => s.replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/
 function isValidIdentifier(s) {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s);
 }
+var greyAlias = (prop) => {
+  if (!/(^|_)gray(_|$)/.test(prop)) return null;
+  return prop.replace(/(^|_)gray(?=_|$)/, "$1grey");
+};
 function processClassList(classList) {
   const standard = [];
   const colorProps = /* @__PURE__ */ new Set();
@@ -378,6 +382,12 @@ function processClassList(classList) {
       colorProps.add(prop);
     }
     standard.push({ prop, isColor: !!hasNumericModifiers });
+    const grey = greyAlias(prop);
+    if (grey && !seen.has(grey)) {
+      seen.add(grey);
+      if (hasNumericModifiers) colorProps.add(grey);
+      standard.push({ prop: grey, isColor: !!hasNumericModifiers });
+    }
   }
   return { standard, colorProps };
 }
@@ -464,7 +474,9 @@ async function generateTypes() {
     }
     opacityValues.push(...[...opacitySet].sort((a, b) => Number(a) - Number(b)));
   }
-  const twClassNames = standardClasses.map(({ prop }) => fmtToTailwind(prop));
+  const twClassNames = standardClasses.map(
+    ({ prop }) => fmtToTailwind(prop).replace(/(^|-)grey(?=-|$)/, "$1gray")
+  );
   const cssResults = ctx.candidatesToCss(twClassNames);
   const cssMap = /* @__PURE__ */ new Map();
   for (let i = 0; i < standardClasses.length; i++) {
@@ -479,7 +491,7 @@ async function generateTypes() {
     config.showPixelEquivalents,
     config.rootFontSize
   );
-  const typewindDistDir = import_path2.default.dirname(require.resolve("typewind"));
+  const typewindDistDir = import_path2.default.dirname(require.resolve("typewind-v4"));
   import_fs2.default.writeFileSync(import_path2.default.join(typewindDistDir, "index.d.ts"), typeContent, "utf8");
   const namedClassSet = classList.filter(([name]) => !/[\[\/()]/.test(name)).map(([name]) => name);
   const metadata = { variants, classSet: namedClassSet };
@@ -488,6 +500,16 @@ async function generateTypes() {
     JSON.stringify(metadata),
     "utf8"
   );
+  const sourceInlineCss = `@source inline("${namedClassSet.join(" ")}");`;
+  import_fs2.default.writeFileSync(
+    import_path2.default.join(typewindDistDir, "_typewind-source.css"),
+    sourceInlineCss,
+    "utf8"
+  );
+  const classesFilePath = import_path2.default.join(process.cwd(), ".typewind-classes.txt");
+  if (!import_fs2.default.existsSync(classesFilePath)) {
+    import_fs2.default.writeFileSync(classesFilePath, "", "utf8");
+  }
   console.log(
     `\u2713 Generated ${standardClasses.length} type definitions with ${variants.length} variants`
   );

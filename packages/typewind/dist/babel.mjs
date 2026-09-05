@@ -163,7 +163,7 @@ function typewindBabelPlugin() {
         const code = generator(prevPath.node).code;
         const { result } = (0, import_eval.default)(
           `
-const { createTw } = require("typewind/dist/evaluate.js");
+const { createTw } = require("typewind-v4/dist/evaluate.js");
 const tw = createTw();
 try {
   let result$$ = ${code};
@@ -198,7 +198,7 @@ function transformBabel(ext, content) {
   const babel = __require("@babel/core");
   const config = {
     filename: `typewind.${ext}`,
-    plugins: ["typewind/babel"]
+    plugins: ["typewind-v4/babel"]
   };
   if (ext === "ts" || ext === "tsx") {
     config.presets = ["@babel/preset-typescript"];

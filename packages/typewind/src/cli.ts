@@ -95,6 +95,16 @@ function isValidIdentifier(s: string): boolean {
 
 type ClassEntry = [string, { modifiers?: string[] }];
 
+// Tailwind's color scale only ships under the "gray" spelling. Typewind
+// accepts "grey" as an interchangeable alias, so every "*_gray_*" / "*_gray"
+// / "gray_*" prop gets a same-shaped "grey" twin (mirrored at runtime in
+// evaluate.ts / runtime.ts, which normalize "grey" back to "gray" before it
+// ever reaches an actual Tailwind class name).
+const greyAlias = (prop: string): string | null => {
+  if (!/(^|_)gray(_|$)/.test(prop)) return null;
+  return prop.replace(/(^|_)gray(?=_|$)/, '$1grey');
+};
+
 function processClassList(classList: ClassEntry[]): {
   standard: { prop: string; isColor: boolean }[];
   colorProps: Set<string>;
@@ -129,6 +139,13 @@ function processClassList(classList: ClassEntry[]): {
     }
 
     standard.push({ prop, isColor: !!hasNumericModifiers });
+
+    const grey = greyAlias(prop);
+    if (grey && !seen.has(grey)) {
+      seen.add(grey);
+      if (hasNumericModifiers) colorProps.add(grey);
+      standard.push({ prop: grey, isColor: !!hasNumericModifiers });
+    }
   }
 
   return { standard, colorProps };
@@ -253,8 +270,12 @@ export async function generateTypes() {
     opacityValues.push(...[...opacitySet].sort((a, b) => Number(a) - Number(b)));
   }
 
-  // Batch-fetch CSS for all standard classes for hover tooltips
-  const twClassNames = standardClasses.map(({ prop }) => fmtToTailwind(prop));
+  // Batch-fetch CSS for all standard classes for hover tooltips. "grey"
+  // aliases have no real Tailwind candidate, so query Tailwind with the
+  // "gray" spelling but key the resulting doc under the "grey" prop.
+  const twClassNames = standardClasses.map(({ prop }) =>
+    fmtToTailwind(prop).replace(/(^|-)grey(?=-|$)/, '$1gray')
+  );
   const cssResults = ctx.candidatesToCss(twClassNames) as (string | null)[];
   const cssMap = new Map<string, string>();
   for (let i = 0; i < standardClasses.length; i++) {
@@ -271,7 +292,7 @@ export async function generateTypes() {
     config.rootFontSize,
   );
 
-  const typewindDistDir = path.dirname(require.resolve('typewind'));
+  const typewindDistDir = path.dirname(require.resolve('typewind-v4'));
 
   fs.writeFileSync(path.join(typewindDistDir, 'index.d.ts'), typeContent, 'utf8');
 
@@ -290,6 +311,27 @@ export async function generateTypes() {
     JSON.stringify(metadata),
     'utf8'
   );
+
+  // Generate a CSS file with @source inline() containing every named class.
+  // This is imported by the project's index.css and is more reliable than
+  // @source file scanning because it doesn't depend on the oxide scanner
+  // recognising a .json file as a valid source.
+  const sourceInlineCss = `@source inline("${namedClassSet.join(' ')}");`;
+  fs.writeFileSync(
+    path.join(typewindDistDir, '_typewind-source.css'),
+    sourceInlineCss,
+    'utf8'
+  );
+
+  // Create .typewind-classes.txt in the project root if it doesn't exist.
+  // This file is the @source target for opacity modifiers and other classes
+  // that only appear after the Babel transform.  The Vite plugin regenerates
+  // it on every build/serve startup; we just ensure the file exists so that
+  // @source never references a missing path (which would break CSS generation).
+  const classesFilePath = path.join(process.cwd(), '.typewind-classes.txt');
+  if (!fs.existsSync(classesFilePath)) {
+    fs.writeFileSync(classesFilePath, '', 'utf8');
+  }
 
   console.log(
     `✓ Generated ${standardClasses.length} type definitions with ${variants.length} variants`

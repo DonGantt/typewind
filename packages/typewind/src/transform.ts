@@ -1,7 +1,7 @@
-// DEPRECATED: typewind/transform is not supported with Tailwind v4.
+// DEPRECATED: typewind-v4/transform is not supported with Tailwind v4.
 // Use the Vite plugin instead:
 //
-//   import { typewindVitePlugin } from 'typewind/vite'
+//   import { typewindVitePlugin } from 'typewind-v4/vite'
 //
 // In vite.config.ts:
 //   plugins: [typewindVitePlugin(), ...]
@@ -11,9 +11,9 @@
 
 if (typeof process !== 'undefined') {
   console.warn(
-    '[typewind] typewind/transform is deprecated and has no effect with Tailwind v4.\n' +
+    '[typewind] typewind-v4/transform is deprecated and has no effect with Tailwind v4.\n' +
       'Remove it from your tailwind.config and use the Vite plugin instead:\n' +
-      '  import { typewindVitePlugin } from "typewind/vite"\n'
+      '  import { typewindVitePlugin } from "typewind-v4/vite"\n'
   );
 }
 

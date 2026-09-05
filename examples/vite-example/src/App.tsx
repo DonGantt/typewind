@@ -1,4 +1,4 @@
-import { tw } from 'typewind';
+import { tw } from 'typewind-v4';
 import './index.css';
 
 const t = {

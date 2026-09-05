@@ -88,7 +88,7 @@ Replace the PostCSS-based Tailwind setup with the Vite plugin:
 // vite.config.ts
 import { defineConfig } from 'vite'
 import { reactRouter } from '@react-router/dev/vite'
-import { tailwindcss } from '@tailwindcss/vite'       // NEW
+import tailwindcss from '@tailwindcss/vite'            // NEW
 import { typewindVitePlugin } from 'typewind/vite'     // NEW (replaces typewindTransforms)
 import tsconfigPaths from 'vite-tsconfig-paths'
 

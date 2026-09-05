@@ -25,6 +25,7 @@ __export(runtime_exports, {
 });
 module.exports = __toCommonJS(runtime_exports);
 var fmtToTailwind = (s) => s.replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/, "/");
+var greyToGray = (s) => s.replace(/(^|-)grey(?=-|$)/g, "$1gray");
 var knownClasses = /* @__PURE__ */ new Set();
 try {
   if (typeof require !== "undefined" && typeof __dirname !== "undefined") {
@@ -57,7 +58,7 @@ function createRuntimeTw() {
     });
     function spreadModifier(prefix, chunks) {
       for (const chunk of chunks.toString().split(" ")) {
-        target.classes.add(`${prefix}${chunk}`);
+        target.classes.add(`${prefix}${greyToGray(chunk)}`);
       }
     }
     const thisTw = new Proxy(target, {
@@ -75,10 +76,10 @@ function createRuntimeTw() {
           return typeof value === "function" ? value.bind(prim) : value;
         }
         if (typeof p !== "string") return null;
-        const name = fmtToTailwind(p);
+        const name = greyToGray(fmtToTailwind(p));
         if (target2.prevProp?.endsWith("-")) {
           const base = target2.prevProp.slice(0, -1);
-          const namedClass = `${base}-${p}`;
+          const namedClass = greyToGray(`${base}-${p}`);
           target2.classes.add(knownClasses.has(namedClass) ? namedClass : `${base}-[${p}]`);
         } else if (target2.prevProp?.endsWith("/")) {
           target2.classes.add(`${target2.prevProp}${name}`);

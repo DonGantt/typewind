@@ -1,4 +1,4 @@
-const { typewindTransforms } = require('typewind/transform');
+const { typewindTransforms } = require('typewind-v4/transform');
 
 /** @type {import('tailwindcss').Config} */
 module.exports = {

@@ -72,6 +72,12 @@ try {
 const fmtToTailwind = (s: string) =>
   s.replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
 
+// Tailwind's color scale only ships under the "gray" spelling. Users who
+// write "grey" (either via the typed `tw.bg_grey_500` alias generated in
+// cli.ts, or a raw/variant string) get the same utility as "gray" — normalize
+// here, once, so every downstream lookup/output only ever sees "gray".
+const greyToGray = (s: string) => s.replace(/(^|-)grey(?=-|$)/g, '$1gray');
+
 export const createTw: any = () => {
   const twUsed = (classes = new Set<string>()) => {
     const target = {
@@ -88,11 +94,11 @@ export const createTw: any = () => {
         if (p === 'toString') return Reflect.get(...arguments);
         if (typeof p !== 'string') return null;
 
-        const name = fmtToTailwind(p);
+        const name = greyToGray(fmtToTailwind(p));
 
         if (t.prevProp?.endsWith('-')) {
           const base = t.prevProp.slice(0, -1);
-          const namedClass = `${base}-${p}`;
+          const namedClass = greyToGray(`${base}-${p}`);
           // Use the named Tailwind class when it exists; otherwise treat as
           // an arbitrary CSS value and wrap in brackets.
           t.classes.add(knownClasses.has(namedClass) ? namedClass : `${base}-[${p}]`);
@@ -102,7 +108,7 @@ export const createTw: any = () => {
         } else if (!name.endsWith('-') && !name.endsWith('/')) {
           function spreadModifier(prefix: string, chunks: any) {
             for (const chunk of chunks.toString().split(' ')) {
-              t.classes.add(`${prefix}${chunk}`);
+              t.classes.add(`${prefix}${greyToGray(chunk)}`);
             }
             return thisTw;
           }

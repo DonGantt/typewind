@@ -1,6 +1,12 @@
 const fmtToTailwind = (s: string) =>
   s.replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
 
+// Tailwind's color scale only ships under the "gray" spelling. Users who
+// write "grey" (either via the typed `tw.bg_grey_500` alias generated in
+// cli.ts, or a raw/variant string) get the same utility as "gray" — normalize
+// here, once, so every downstream lookup/output only ever sees "gray".
+const greyToGray = (s: string) => s.replace(/(^|-)grey(?=-|$)/g, '$1gray');
+
 type ToStringable = { toString(): string };
 
 // Named Tailwind class set for smart arbitrary-value lookup.
@@ -44,7 +50,7 @@ export function createRuntimeTw() {
 
     function spreadModifier(prefix: string, chunks: ToStringable) {
       for (const chunk of chunks.toString().split(' ')) {
-        target.classes.add(`${prefix}${chunk}`);
+        target.classes.add(`${prefix}${greyToGray(chunk)}`);
       }
     }
 
@@ -67,11 +73,11 @@ export function createRuntimeTw() {
 
         if (typeof p !== 'string') return null;
 
-        const name = fmtToTailwind(p);
+        const name = greyToGray(fmtToTailwind(p));
 
         if (target.prevProp?.endsWith('-')) {
           const base = target.prevProp.slice(0, -1);
-          const namedClass = `${base}-${p}`;
+          const namedClass = greyToGray(`${base}-${p}`);
           target.classes.add(knownClasses.has(namedClass) ? namedClass : `${base}-[${p}]`);
         } else if (target.prevProp?.endsWith('/')) {
           target.classes.add(`${target.prevProp}${name}`);

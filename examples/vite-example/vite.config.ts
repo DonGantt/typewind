@@ -3,5 +3,5 @@ import react from '@vitejs/plugin-react';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react({ babel: { plugins: ['typewind/babel'] } })],
+  plugins: [react({ babel: { plugins: ['typewind-v4/babel'] } })],
 });

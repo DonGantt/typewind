@@ -1,5 +1,5 @@
 import Head from 'next/head';
-import { tw } from 'typewind';
+import { tw } from 'typewind-v4';
 
 export default function Home() {
   return (

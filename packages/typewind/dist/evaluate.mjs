@@ -173,6 +173,7 @@ try {
 } catch {
 }
 var fmtToTailwind = (s) => s.replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/, "/");
+var greyToGray = (s) => s.replace(/(^|-)grey(?=-|$)/g, "$1gray");
 var createTw = () => {
   const twUsed = (classes = /* @__PURE__ */ new Set()) => {
     const target = {
@@ -186,17 +187,17 @@ var createTw = () => {
       get(t, p, recv) {
         if (p === "toString") return Reflect.get(...arguments);
         if (typeof p !== "string") return null;
-        const name = fmtToTailwind(p);
+        const name = greyToGray(fmtToTailwind(p));
         if (t.prevProp?.endsWith("-")) {
           const base = t.prevProp.slice(0, -1);
-          const namedClass = `${base}-${p}`;
+          const namedClass = greyToGray(`${base}-${p}`);
           t.classes.add(knownClasses.has(namedClass) ? namedClass : `${base}-[${p}]`);
         } else if (t.prevProp?.endsWith("/")) {
           t.classes.add(`${t.prevProp}${name}`);
         } else if (!name.endsWith("-") && !name.endsWith("/")) {
           let spreadModifier2 = function(prefix, chunks) {
             for (const chunk of chunks.toString().split(" ")) {
-              t.classes.add(`${prefix}${chunk}`);
+              t.classes.add(`${prefix}${greyToGray(chunk)}`);
             }
             return thisTw;
           };

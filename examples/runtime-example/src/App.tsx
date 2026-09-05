@@ -1,5 +1,5 @@
-import { tw } from 'typewind';
-import { cn } from 'typewind/cn';
+import { tw } from 'typewind-v4';
+import { cn } from 'typewind-v4/cn';
 
 import './index.css';
 

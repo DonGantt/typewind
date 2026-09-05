@@ -1,4 +1,4 @@
-import { tw } from 'typewind';
+import { tw } from 'typewind-v4';
 
 export default function Button() {
   console.log(tw.text_red_100);

@@ -37,7 +37,7 @@ export default function typewindBabelPlugin(): PluginObj<
 
         const { result } = _eval(
           `
-const { createTw } = require("typewind/dist/evaluate.js");
+const { createTw } = require("typewind-v4/dist/evaluate.js");
 const tw = createTw();
 try {
   let result$$ = ${code};
@@ -75,7 +75,7 @@ export function transformBabel(ext: string, content: string): string {
 
   const config: import('@babel/core').TransformOptions = {
     filename: `typewind.${ext}`,
-    plugins: ['typewind/babel'],
+    plugins: ['typewind-v4/babel'],
   };
 
   if (ext === 'ts' || ext === 'tsx') {

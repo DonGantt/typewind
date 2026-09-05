@@ -1,5 +1,5 @@
 // @ts-ignore
-import { transformBabel } from 'typewind/babel';
+import { transformBabel } from 'typewind-v4/babel';
 import * as glob from 'glob';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -46,5 +46,9 @@ describe('transformBabel', () => {
 
   test('works with transform', () => {
     setupTest(fixturesDir, 'transform');
+  });
+
+  test('works with grey-alias', () => {
+    setupTest(fixturesDir, 'grey-alias');
   });
 });
