@@ -12,6 +12,16 @@ on:
 permissions:
   contents: write
 
+env:
+  # examples/*'s postinstall runs `typewind generate`, which needs a local
+  # Tailwind CSS entry file the examples don't ship (they're meant to be run
+  # interactively, not installed headlessly). The explicit `--ignore-scripts`
+  # on `npm ci` below only covers that one command - release-it's version
+  # bump internally calls `npm version`, which re-syncs the workspace lockfile
+  # and reruns every workspace's lifecycle scripts unless scripts are
+  # disabled globally, hence this env var rather than just the CLI flag.
+  npm_config_ignore_scripts: "true"
+
 jobs:
   release:
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.title, 'release:')
