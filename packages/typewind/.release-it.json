@@ -4,5 +4,8 @@
   },
   "git": {
     "commitMessage": "release: v${version}"
+  },
+  "npm": {
+    "publish": false
   }
 }

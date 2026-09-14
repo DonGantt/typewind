@@ -1,0 +1,113 @@
+name: Finalize Release
+
+# Fires once a "release: ..." PR (development -> main, opened by
+# release-pr.yml) is merged by a human. Runs release-it in packages/typewind
+# to bump the version, tag, cut a GitHub release, and publish to npm.
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.title, 'release:')
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # --ignore-scripts: examples/*'s postinstall runs `typewind generate`,
+      # which needs a local Tailwind CSS entry file the examples don't ship
+      # (they're meant to be run interactively, not installed headlessly).
+      # Not needed to build/publish packages/typewind itself.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build --workspace packages/typewind
+
+      # Increment defaults to patch; pass a different bump by re-dispatching
+      # release-pr.yml manually and merging, or running release-it locally
+      # for a minor/major.
+      # release-it handles the version bump, git tag, and GitHub release; npm
+      # publishing itself is disabled here (packages/typewind/.release-it.json
+      # sets npm.publish: false) so the separate, environment-gated `publish`
+      # job below can publish via OIDC trusted publishing instead.
+      - name: Bump version, tag, and create GitHub release
+        working-directory: packages/typewind
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release -- --ci --increment=patch
+
+      - name: Capture new tag
+        id: tag
+        run: echo "tag=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    # Gates the actual npm publish behind this environment - set required
+    # reviewers on it in the repo's Settings -> Environments if you want a
+    # manual approval step before anything reaches the npm registry. This is
+    # also the environment name to enter in npm's Trusted Publisher form.
+    environment: npm-publish
+    permissions:
+      id-token: write # required for npm OIDC trusted publishing
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing (OIDC) needs npm >= 11.5.1; setup-node's bundled
+      # npm on the node-version above may be older, so pin it explicitly.
+      - name: Update npm
+        run: npm install -g npm@latest
+
+      # --ignore-scripts: examples/*'s postinstall runs `typewind generate`,
+      # which needs a local Tailwind CSS entry file the examples don't ship
+      # (they're meant to be run interactively, not installed headlessly).
+      # Not needed to build/publish packages/typewind itself.
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build --workspace packages/typewind
+
+      # No auth token needed: npm's CLI detects the GitHub Actions OIDC token
+      # and exchanges it for a short-lived publish credential, provided this
+      # repo + workflow file + environment are configured as a Trusted
+      # Publisher for typewind-v4 at npmjs.com (package Settings -> Trusted
+      # Publisher).
+      - name: Publish to npm
+        working-directory: packages/typewind
+        run: npm publish
