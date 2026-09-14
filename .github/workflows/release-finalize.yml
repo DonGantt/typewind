@@ -38,8 +38,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+      # --ignore-scripts: examples/*'s postinstall runs `typewind generate`,
+      # which needs a local Tailwind CSS entry file the examples don't ship
+      # (they're meant to be run interactively, not installed headlessly).
+      # Not needed to build/publish packages/typewind itself.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build
         run: npm run build --workspace packages/typewind
@@ -89,8 +93,12 @@ jobs:
       - name: Update npm
         run: npm install -g npm@latest
 
+      # --ignore-scripts: examples/*'s postinstall runs `typewind generate`,
+      # which needs a local Tailwind CSS entry file the examples don't ship
+      # (they're meant to be run interactively, not installed headlessly).
+      # Not needed to build/publish packages/typewind itself.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build
         run: npm run build --workspace packages/typewind

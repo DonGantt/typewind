@@ -26,8 +26,12 @@ jobs:
           node-version: 20
           cache: npm
 
+      # --ignore-scripts: examples/*'s postinstall runs `typewind generate`,
+      # which needs a local Tailwind CSS entry file the examples don't ship
+      # (they're meant to be run interactively, not installed headlessly).
+      # Not needed to build/test packages/typewind itself.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build typewind
         run: npm run build --workspace packages/typewind
