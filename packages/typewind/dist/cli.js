@@ -317,6 +317,7 @@ var ARBITRARY_FAMILIES = [
   "shrink",
   "flex",
   "columns",
+  "aspect",
   "grid-cols",
   "grid-rows",
   "col-start",

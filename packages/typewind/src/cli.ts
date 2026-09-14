@@ -67,7 +67,7 @@ const ARBITRARY_FAMILIES = [
   'rounded-tl', 'rounded-tr', 'rounded-br', 'rounded-bl',
   'rounded-ss', 'rounded-se', 'rounded-ee', 'rounded-es',
   // Flex/Grid
-  'z', 'order', 'grow', 'shrink', 'flex', 'columns',
+  'z', 'order', 'grow', 'shrink', 'flex', 'columns', 'aspect',
   'grid-cols', 'grid-rows',
   'col-start', 'col-end', 'col-span', 'row-start', 'row-end', 'row-span',
   // Scroll
