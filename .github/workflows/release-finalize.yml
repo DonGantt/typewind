@@ -111,6 +111,11 @@ jobs:
       - name: Clear placeholder npm auth token
         run: npm config delete //registry.npmjs.org/:_authToken
 
+      - name: Check OIDC env
+        run: |
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL set: ${ACTIONS_ID_TOKEN_REQUEST_URL:+yes}"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN set: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+yes}"
+
       - name: Publish to npm
         working-directory: packages/typewind
         run: npm publish --provenance
