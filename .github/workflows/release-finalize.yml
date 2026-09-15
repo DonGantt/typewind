@@ -98,26 +98,25 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      # Trusted publishing (OIDC) needs npm >= 11.5.1; setup-node's bundled
-      # npm on the node-version above may be older, so pin it explicitly.
       - name: Update npm
         run: npm install -g npm@latest
 
-      # --ignore-scripts: examples/*'s postinstall runs `typewind generate`,
-      # which needs a local Tailwind CSS entry file the examples don't ship
-      # (they're meant to be run interactively, not installed headlessly).
-      # Not needed to build/publish packages/typewind itself.
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
       - name: Build
         run: npm run build --workspace packages/typewind
 
-      # No auth token needed: npm's CLI detects the GitHub Actions OIDC token
-      # and exchanges it for a short-lived publish credential, provided this
-      # repo + workflow file + environment are configured as a Trusted
-      # Publisher for typewind-v4 at npmjs.com (package Settings -> Trusted
-      # Publisher).
+      - name: Debug npm auth state
+        run: |
+          npm --version
+          which npm
+          npm config get //registry.npmjs.org/:_authToken
+          npm config list
+
+      - name: Clear placeholder npm auth token
+        run: npm config delete //registry.npmjs.org/:_authToken || true
+
       - name: Publish to npm
         working-directory: packages/typewind
         run: npm publish
