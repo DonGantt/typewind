@@ -108,15 +108,13 @@ jobs:
       - name: Build
         run: npm run build --workspace packages/typewind
 
+      - name: Clear placeholder npm auth token
+        run: npm config delete //registry.npmjs.org/:_authToken
+
       - name: Debug npm auth state
         run: |
           npm --version
-          which npm
-          npm config get //registry.npmjs.org/:_authToken
           npm config list
-
-      - name: Clear placeholder npm auth token
-        run: npm config delete //registry.npmjs.org/:_authToken || true
 
       - name: Publish to npm
         working-directory: packages/typewind
