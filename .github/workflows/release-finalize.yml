@@ -109,7 +109,3 @@ jobs:
         run: |
           unset NODE_AUTH_TOKEN
           npm stage publish
-
-      - name: List pending stages
-        working-directory: packages/typewind
-        run: npm stage list
