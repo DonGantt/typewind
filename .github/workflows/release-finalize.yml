@@ -106,7 +106,7 @@ jobs:
 
       - name: Stage publish to npm
         working-directory: packages/typewind
-        run: npm stage publish --provenance
+        run: npm stage publish
 
       - name: List pending stages
         working-directory: packages/typewind
