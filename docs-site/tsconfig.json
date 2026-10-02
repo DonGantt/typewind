@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "app/*": ["./app/*"],
+      "shared/*": ["./src/shared/*"],
+      "pages/*": ["./src/pages/*"],
+      "utils/*": ["./src/utils/*"],
+      "content/*": ["./src/content/*"]
+    },
+    "rootDirs": ["./src", ".react-router/types", "./app"],
+
+    "target": "ES2022",
+    "module": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ESNext"],
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "jsx": "react-jsx",
+
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    "isolatedModules": true,
+    "noEmit": true,
+
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "app", ".react-router/types", "**/*.ts", "**/*.tsx", "**/*.mdx"],
+  "exclude": ["node_modules", "build", ".react-router"]
+}

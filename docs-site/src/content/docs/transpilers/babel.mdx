@@ -1,0 +1,22 @@
+---
+title: Babel
+description: Add the typewind-v4 Babel plugin to compile the tw proxy away at build time in any Babel-based toolchain.
+---
+
+import { Callout } from 'shared/components'
+
+## Babel
+
+Add the `typewind-v4` plugin to your `.babelrc`.
+
+```json filename=".babelrc" copy {3}
+{
+  "presets": [],
+  "plugins": ["typewind-v4/babel"]
+}
+```
+
+<Callout type="info">
+  Some frameworks like Vite have a different way of editting your babel plugin,
+  so make sure to take a look at their docs first.
+</Callout>

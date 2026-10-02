@@ -26,6 +26,20 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          targets: wasm32-wasip1
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/typewind/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/typewind/Cargo.lock') }}
+
       # --ignore-scripts: examples/*'s postinstall runs `typewind generate`,
       # which needs a local Tailwind CSS entry file the examples don't ship
       # (they're meant to be run interactively, not installed headlessly).

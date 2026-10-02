@@ -44,6 +44,11 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          targets: wasm32-wasip1
+
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
@@ -94,6 +99,11 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@1.87.0
+        with:
+          targets: wasm32-wasip1
 
       - name: Update npm
         run: npm install -g npm@latest

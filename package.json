@@ -28,7 +28,7 @@
     "typewind-v4": "*"
   },
   "dependencies": {
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.2",
     "glob": "^11.0.0"
   }
 }

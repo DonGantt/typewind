@@ -1,0 +1,39 @@
+---
+title: Arbitrary Values
+description: Pass arbitrary values to the tw proxy using Tailwind's bracket syntax, fully typed and autocompleted.
+---
+
+import { Tabs, Tab, Callout } from 'shared/components'
+import { CodeOutput } from 'shared/components'
+
+## Arbitrary Values
+
+You can also pass arbitrary values to the `tw` proxy using the same familiar `[]` syntax which tailwind provides us with.
+
+```jsx /text_['20px']/
+import { tw } from 'typewind-v4'
+
+export default function App() {
+  return (
+    <button className={tw.text_['20px'].py_3.px_4.bg_blue_500}>Click Me</button>
+  );
+}
+```
+
+<Tabs items={['Code Output', 'Result']}>
+  <Tab>
+    ```tsx
+    <button className="text-[20px] py-3 px-4 bg-blue-500">Click Me</button>
+    ```
+  </Tab>
+  <Tab>
+    <CodeOutput>
+      <button className="text-[20px] py-3 px-4 bg-blue-500">Click Me</button>
+    </CodeOutput>
+  </Tab>
+</Tabs>
+
+<Callout type="info">
+  For more reference, checkout the [Tailwind Docs for Arbitrary
+  Values](https://tailwindcss.com/docs/adding-custom-styles#using-arbitrary-values).
+</Callout>

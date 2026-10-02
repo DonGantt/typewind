@@ -1,0 +1,108 @@
+---
+title: Installation
+description: Install typewind-v4 and generate type definitions from your Tailwind config to get typesafe autocomplete for every utility class.
+---
+
+import { Tab, Tabs, Callout, Cards, Card, Steps } from 'shared/components'
+
+# Get started with Typewind
+
+## Setup Tailwind
+
+Make sure you have Tailwind setup. You can follow the [official Tailwind Installation docs](https://tailwindcss.com/docs/installation) to get started.
+
+## Installation
+
+Install `typewind-v4` via npm
+
+```fish filename="Terminal" copy
+npm install typewind-v4
+```
+
+## Generating type definitions
+
+`typewind generate` goes through your `tailwind.config.js` and generates type definitions and css docs based on your theme. This means that the type definitions will be custom to your configuration, and include styles for plugins etc.
+
+```fish filename="Terminal" copy
+npx typewind generate
+```
+
+<Callout>
+  These definitions need to be generated each time you install a new package via
+  npm, or edit `tailwind.config.js`
+</Callout>
+
+It is recommended to set this as your `postinstall` script:-
+
+```json filename="package.json"
+{
+  "scripts": {
+    "postinstall": "typewind generate"
+  }
+}
+```
+
+## Quick Start
+
+<Steps>
+### Setup transpiler
+   Typewind has support for both Babel and SWC.
+   <Cards>
+     <Card
+       icon={
+         <svg
+           xmlns="http://www.w3.org/2000/svg"
+           fill="none"
+           viewBox="0 0 24 24"
+           strokeWidth={1.5}
+           stroke="currentColor"
+           className="w-6 h-6"
+         >
+           <path
+             strokeLinecap="round"
+             strokeLinejoin="round"
+             d="M8.25 4.5l7.5 7.5-7.5 7.5"
+           />
+         </svg>
+       }
+       title="Babel"
+       href="/docs/transpilers/babel"
+     ></Card>
+     <Card
+       icon={
+         <svg
+           xmlns="http://www.w3.org/2000/svg"
+           fill="none"
+           viewBox="0 0 24 24"
+           strokeWidth={1.5}
+           stroke="currentColor"
+           className="w-6 h-6"
+         >
+           <path
+             strokeLinecap="round"
+             strokeLinejoin="round"
+             d="M8.25 4.5l7.5 7.5-7.5 7.5"
+           />
+         </svg>
+       }
+       title="SWC"
+       href="/docs/transpilers/swc"
+     ></Card>
+   </Cards>
+
+### Add transformer
+
+Add the `typewind` transformers in your `tailwind.config.js`.
+
+```js /typewindTransforms/ filename="tailwind.config.js" copy
+const { typewindTransforms } = require('typewind/transform');
+
+/** @type {import('tailwindcss').Config} \*/
+module.exports = {
+  content: {
+    files: ['./src/**/*.{js,jsx,ts,tsx}'],
+    transform: typewindTransforms,
+  },
+};
+```
+</Steps>

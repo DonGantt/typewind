@@ -1,0 +1,80 @@
+---
+title: Arbitrary Variants
+description: Use Typewind's variant() function to apply arbitrary Tailwind variants with type-safe class names.
+---
+
+import { Tabs, Tab, Callout } from 'shared/components'
+import { CodeOutput } from 'shared/components'
+
+## Arbitrary Variants
+Tailwind v3.1 released [support for Arbitrary Variants](https://tailwindcss.com/docs/hover-focus-and-other-states#using-arbitrary-variants).
+You can use the `variant()` function to work with arbitrary variants, which takes in the variant as the first argument and the Typewind classes as the second.
+
+```jsx /text_['20px']/
+import { tw } from 'typewind-v4'
+
+export default function App() {
+  return (
+    <ul>
+      {Array(5)
+        .fill(' ')
+        .map((_, i) => (
+          <li
+            key={i}
+            className={
+              tw.variant('&:nth-child(3)', tw.underline)
+                .list_disc.mx_5.text_white
+            }
+          >
+            Item {i}
+          </li>
+        ))}
+    </ul>
+  );
+}
+```
+
+<Callout type="info">
+Note that here, the modifiers passed in are the exact same as their Tailwind counterparts and do not use the `_` syntax typically used by Typewind.
+</Callout>
+
+<Tabs items={['Code Output', 'Result']}>
+  <Tab>
+    ```tsx
+    <ul>
+      {Array(5)
+        .fill(' ')
+        .map((_, i) => (
+          <li
+            key={i}
+            className="[&:nth-child(3)]:underline list-disc mx-5 text-white"
+          >
+            Item {i}
+          </li>
+        ))}
+    </ul>
+    ```
+  </Tab>
+  <Tab>
+    <CodeOutput>
+      <ul>
+        {Array(5)
+          .fill(' ')
+          .map((_, i) => (
+            <li
+              key={i}
+              className="[&:nth-child(3)]:underline list-disc mx-5 text-white"
+            >
+              Item {i}
+            </li>
+          ))}
+      </ul>
+    </CodeOutput>
+  </Tab>
+</Tabs>
+
+
+<Callout type="info">
+  For more reference, checkout the [Tailwind Docs for Arbitrary
+  Variants](https://tailwindcss.com/docs/hover-focus-and-other-states#using-arbitrary-variants).
+</Callout>

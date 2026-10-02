@@ -1,0 +1,44 @@
+---
+title: SWC
+description: Configure Typewind's SWC plugin to compile tw styles away in Next.js and other SWC-based build tools.
+---
+
+import { Callout } from 'shared/components'
+
+## SWC
+
+### NextJS
+
+Add the `typewind-v4` plugin to your `next.config.js`.
+
+```js filename="next.config.js" copy {5}
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  reactStrictMode: true,
+  experimental: {
+    swcPlugins: [['typewind-v4/swc', {}]],
+  },
+};
+
+module.exports = nextConfig;
+```
+
+### Standalone SWC
+
+Add the `typewind-v4` plugin to your `.swcrc`.
+
+```json filename=".swcrc" copy {4}
+{
+  "jsc": {
+    "experimental": {
+      "plugins": [["typewind-v4/swc", {}]]
+    }
+  }
+}
+```
+
+<div id="swc-caveat">
+  <Callout type="info" emoji="⚠️">
+    The SWC transpiler compiled directly to WASM binary and can't read the Tailwind config file, so arbitrary values only work for predefined tailwind values.
+  </Callout>
+</div>

@@ -1,0 +1,55 @@
+---
+title: Usage
+description: See a complete Typewind example showing the tw proxy compiling directly to Tailwind CSS utility classes.
+---
+
+import { Tabs, Tab, Callout } from 'shared/components'
+import { CodeOutput } from 'shared/components'
+
+# Usage
+
+## Example
+
+```jsx
+import { tw } from 'typewind-v4'
+
+export default function App() {
+  return (
+    <div
+      className={tw.flex.items_center.justify_center.h_["5em"].bg_white.text_black.dark(
+        tw.bg_black.text_white
+      )}
+    >
+      <h1 className={tw.text_xl.sm(tw.text_3xl).md(tw.text_4xl).font_bold}>
+        Hello World
+      </h1>
+    </div>
+  );
+}
+```
+
+<Tabs items={['Code Output', 'Result']}>
+  <Tab>
+    ```jsx
+    <div
+      className="flex items-center justify-center h-[5em] bg-white text-black dark:bg-black dark:text-white"
+    >
+      <h1 className="text-xl sm:text-3xl md:text-4xl font-bold">
+        Hello World
+      </h1>
+    </div>
+    ```
+  </Tab>
+  <Tab>
+    <CodeOutput>
+      <div
+        className="flex items-center justify-center h-[5em] bg-white text-black dark:bg-black dark:text-white"
+      >
+        <h1 className="text-xl sm:text-3xl md:text-4xl font-bold">
+          Hello World
+        </h1>
+      </div>
+    </CodeOutput>
+  </Tab>
+</Tabs>
+

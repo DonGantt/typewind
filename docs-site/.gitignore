@@ -1,0 +1,26 @@
+dist
+dist-ssr
+*.local
+
+# dependencies
+/node_modules
+
+# misc
+.DS_STORE
+*.pem
+
+# debug
+npm-debug.log*
+
+# local env files
+.env
+.env.local
+
+/build
+
+# Sitemap. Always generate a dynamic one
+/public/sitemap.xml
+/public/robots.txt
+
+# React Router SSR
+/.react-router

@@ -131,7 +131,13 @@ function makeStylesheetLoader(tailwindPkgDir: string) {
   };
 }
 
-export async function createTypewindContext() {
+export interface TypewindDesignSystem {
+  getClassList(): [string, { modifiers?: string[] }][];
+  getVariants(): { name: string; isArbitrary: boolean; values: string[] }[];
+  candidatesToCss(candidates: string[]): (string | null)[];
+}
+
+export async function createTypewindContext(): Promise<TypewindDesignSystem> {
   const cssEntryPath = findCssEntryPath();
   const base = path.dirname(cssEntryPath);
   const cssContent = fs.readFileSync(cssEntryPath, 'utf8');
@@ -144,7 +150,7 @@ export async function createTypewindContext() {
   });
 }
 
-export async function createTypewindContextFromCss(css: string, base: string) {
+export async function createTypewindContextFromCss(css: string, base: string): Promise<TypewindDesignSystem> {
   const tailwindPkgDir = findTailwindPkgDir();
   return await __unstable__loadDesignSystem(css, {
     base,
