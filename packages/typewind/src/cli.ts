@@ -5,7 +5,142 @@ import path from 'path';
 import { transform } from 'lightningcss';
 import { createTypewindContext, loadConfig } from './utils';
 
-function createDoc(css: string, showPixelEquivalents: boolean, rootFontSize: number): string {
+function evalSimpleCalc(expr: string): string | null {
+  const m = expr.trim().match(/^(-?[0-9.]+)(px|rem|em|%)?\s*([*/+-])\s*(-?[0-9.]+)(px|rem|em|%)?$/);
+  if (!m) return null;
+  const [, aNum, aUnit, op, bNum, bUnit] = m;
+  const a = parseFloat(aNum);
+  const b = parseFloat(bNum);
+
+  let unit: string | undefined;
+  if (op === '*' || op === '/') {
+    unit = aUnit || bUnit;
+  } else {
+    if (aUnit && bUnit && aUnit !== bUnit) return null;
+    unit = aUnit || bUnit;
+  }
+
+  let result: number;
+  switch (op) {
+    case '*': result = a * b; break;
+    case '/': result = a / b; break;
+    case '+': result = a + b; break;
+    case '-': result = a - b; break;
+    default: return null;
+  }
+
+  return `${result}${unit ?? ''}`;
+}
+
+function resolveCssValue(value: string, themeMap: Map<string, string>, depth = 0): string {
+  if (depth > 10) return value;
+
+  let resolved = value.replace(
+    /calc\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g,
+    (match, inner) => {
+      const resolvedInner = resolveCssValue(inner, themeMap, depth + 1);
+      return evalSimpleCalc(resolvedInner) ?? match;
+    }
+  );
+
+  resolved = resolved.replace(
+    /var\((--[\w-]+)(?:\s*,\s*((?:[^()]|\([^()]*\))*))?\)/g,
+    (match, name, fallback) => {
+      const themeValue = themeMap.get(name);
+      if (themeValue !== undefined) return resolveCssValue(themeValue, themeMap, depth + 1);
+      if (fallback !== undefined) return resolveCssValue(fallback, themeMap, depth + 1);
+      return match;
+    }
+  );
+
+  return resolved;
+}
+
+function normalizeToPx(value: string, rootFontSize: number): number | null {
+  const remMatch = value.match(/^(-?[0-9.]+)rem$/);
+  if (remMatch) return parseFloat(remMatch[1]) * rootFontSize;
+
+  const pxMatch = value.match(/^(-?[0-9.]+)px$/);
+  if (pxMatch) return parseFloat(pxMatch[1]);
+
+  return null;
+}
+
+function extractFirstRuleBody(css: string): string {
+  const start = css.indexOf('{');
+  if (start === -1) return css;
+  let depth = 0;
+  for (let i = start; i < css.length; i++) {
+    if (css[i] === '{') depth++;
+    else if (css[i] === '}') {
+      depth--;
+      if (depth === 0) return css.slice(start + 1, i);
+    }
+  }
+  return css.slice(start + 1);
+}
+
+function buildValueIndex(
+  cssMap: Map<string, string>,
+  themeMap: Map<string, string>,
+  rootFontSize: number,
+  families: string[]
+): Record<string, Record<string, string>> {
+  const sortedFamilies = [...families].sort((a, b) => b.length - a.length);
+  const index: Record<string, Record<string, string>> = {};
+
+  for (const [prop, css] of cssMap) {
+    const stripped = prop.startsWith('_') ? prop.slice(1) : prop;
+    const family = sortedFamilies.find(
+      (fam) => stripped === fam || stripped.startsWith(fam + '_')
+    );
+    if (!family) continue;
+
+    const declMatch = extractFirstRuleBody(css).match(/:\s*([^;]+);?/);
+    if (!declMatch) continue;
+
+    const resolved = resolveCssValue(declMatch[1].trim(), themeMap);
+    const px = normalizeToPx(resolved, rootFontSize);
+    if (px === null) continue;
+
+    const key = String(px);
+    index[family] ??= {};
+    const existing = index[family][key];
+    if (existing === undefined || (existing.startsWith('_') && !prop.startsWith('_'))) {
+      index[family][key] = prop;
+    }
+  }
+
+  return index;
+}
+
+function extractCssProperties(css: string): string[] {
+  const props = new Set<string>();
+  const declRegex = /([a-zA-Z-]+)\s*:\s*[^;{}]+;/g;
+  let match: RegExpExecArray | null;
+  while ((match = declRegex.exec(css))) {
+    const prop = match[1];
+    if (prop.startsWith('-')) continue;
+    props.add(prop);
+  }
+  return [...props];
+}
+
+function buildCssPropertyIndex(cssMap: Map<string, string>): Record<string, string[]> {
+  const index: Record<string, string[]> = {};
+  for (const [prop, css] of cssMap) {
+    const properties = extractCssProperties(extractFirstRuleBody(css));
+    if (properties.length > 0) index[prop] = properties;
+  }
+  return index;
+}
+
+function createDoc(
+  css: string,
+  showPixelEquivalents: boolean,
+  rootFontSize: number,
+  themeMap: Map<string, string>
+): string {
   try {
     let formatted = transform({
       filename: 'doc.css',
@@ -16,8 +151,26 @@ function createDoc(css: string, showPixelEquivalents: boolean, rootFontSize: num
 
     if (showPixelEquivalents) {
       formatted = formatted.replace(
-        /(-?[0-9.]+)rem/g,
-        (match, p1) => `${match} /* ${parseFloat(p1) * rootFontSize}px *​/`
+        /^(\s*)([\w-]+):\s*([^;]+);/gm,
+        (match, indent, prop, value) => {
+          const annotated = value.replace(
+            /(-?[0-9.]+)rem/g,
+            (m: string, p1: string) => `${m} /* ${parseFloat(p1) * rootFontSize}px *​/`
+          );
+          if (annotated !== value) {
+            return `${indent}${prop}: ${annotated};`;
+          }
+
+          if (/var\(|calc\(/.test(value)) {
+            const resolved = resolveCssValue(value.trim(), themeMap);
+            const remMatch = resolved.match(/^(-?[0-9.]+)rem$/);
+            if (remMatch) {
+              return `${indent}${prop}: ${value}; /* ${parseFloat(remMatch[1]) * rootFontSize}px *​/`;
+            }
+          }
+
+          return match;
+        }
       );
     }
 
@@ -157,7 +310,8 @@ function buildTypeContent(
   opacityValues: string[],
   cssMap: Map<string, string>,
   showPixelEquivalents: boolean,
-  rootFontSize: number
+  rootFontSize: number,
+  themeMap: Map<string, string>
 ): string {
   const opacityType =
     opacityValues.length > 0
@@ -170,7 +324,7 @@ function buildTypeContent(
   const standardProps = standardClasses
     .map(({ prop, isColor }) => {
       const css = cssMap.get(prop);
-      const doc = css ? `/** ${createDoc(css, showPixelEquivalents, rootFontSize)} */\n  ` : '';
+      const doc = css ? `/** ${createDoc(css, showPixelEquivalents, rootFontSize, themeMap)} */\n  ` : '';
       const baseType = `${doc}"${prop}": Property`;
       if (isColor) {
         return `${baseType}; "${prop}$": ${colorModifierMap}`;
@@ -224,6 +378,11 @@ export { tw };
 export async function generateTypes() {
   const config = loadConfig();
   const ctx = await createTypewindContext();
+
+  const themeMap = new Map<string, string>();
+  for (const [key, { value }] of ctx.theme.entries()) {
+    themeMap.set(key, value);
+  }
 
   const classList = ctx.getClassList() as ClassEntry[];
   const { standard: standardClasses } = processClassList(classList);
@@ -290,6 +449,7 @@ export async function generateTypes() {
     cssMap,
     config.showPixelEquivalents,
     config.rootFontSize,
+    themeMap,
   );
 
   const typewindDistDir = path.dirname(require.resolve('typewind-v4'));
@@ -305,7 +465,24 @@ export async function generateTypes() {
     .filter(([name]) => !/[\[\/()]/.test(name))
     .map(([name]) => name);
 
-  const metadata = { variants, classSet: namedClassSet };
+  const valueIndex = buildValueIndex(
+    cssMap,
+    themeMap,
+    config.rootFontSize,
+    ARBITRARY_FAMILIES.map(fmtToTypewind)
+  );
+
+  const classOrder = standardClasses.map(({ prop }) => prop);
+  const cssProperties = buildCssPropertyIndex(cssMap);
+
+  const metadata = {
+    variants,
+    classSet: namedClassSet,
+    valueIndex,
+    rootFontSize: config.rootFontSize,
+    classOrder,
+    cssProperties,
+  };
   fs.writeFileSync(
     path.join(typewindDistDir, '_metadata.json'),
     JSON.stringify(metadata),
