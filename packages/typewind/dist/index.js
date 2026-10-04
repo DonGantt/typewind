@@ -40,7 +40,7 @@ try {
   }
 } catch {
 }
-var typewind_id = Symbol.for("typewind_style");
+var typewind_id = /* @__PURE__ */ Symbol.for("typewind_style");
 function createRuntimeTw() {
   const twUsed = (classes = /* @__PURE__ */ new Set()) => {
     const target = Object.assign(() => {
