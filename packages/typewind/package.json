@@ -6,7 +6,10 @@
   "main": "dist/index.js",
   "homepage": "https://github.com/DonGantt/typewind",
   "files": [
-    "dist"
+    "dist/**/*.js",
+    "dist/**/*.mjs",
+    "dist/**/*.d.ts",
+    "dist/**/*.d.mts"
   ],
   "scripts": {
     "build": "tsup",
