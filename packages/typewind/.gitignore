@@ -1,1 +1,3 @@
 target/
+dist/_metadata.json
+dist/_typewind-source.css
