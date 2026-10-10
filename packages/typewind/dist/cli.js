@@ -636,7 +636,17 @@ async function generateTypes() {
     config.rootFontSize,
     ARBITRARY_FAMILIES.map(fmtToTypewind)
   );
-  const classOrder = standardClasses.map(({ prop }) => prop);
+  const classOrderPairs = ctx.getClassOrder(twClassNames);
+  const kebabToOrder = /* @__PURE__ */ new Map();
+  for (const [kebab, pos] of classOrderPairs) {
+    if (pos !== null) kebabToOrder.set(kebab, pos);
+  }
+  const classOrder = standardClasses.map(({ prop }, i) => ({ prop, order: kebabToOrder.get(twClassNames[i]) })).sort((a, b) => {
+    if (a.order === void 0 && b.order === void 0) return 0;
+    if (a.order === void 0) return 1;
+    if (b.order === void 0) return -1;
+    return a.order < b.order ? -1 : a.order > b.order ? 1 : 0;
+  }).map(({ prop }) => prop);
   const cssProperties = buildCssPropertyIndex(cssMap);
   const metadata = {
     variants,

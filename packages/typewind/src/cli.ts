@@ -472,7 +472,20 @@ export async function generateTypes() {
     ARBITRARY_FAMILIES.map(fmtToTypewind)
   );
 
-  const classOrder = standardClasses.map(({ prop }) => prop);
+  const classOrderPairs = ctx.getClassOrder(twClassNames) as [string, bigint | null][];
+  const kebabToOrder = new Map<string, bigint>();
+  for (const [kebab, pos] of classOrderPairs) {
+    if (pos !== null) kebabToOrder.set(kebab, pos);
+  }
+  const classOrder = standardClasses
+    .map(({ prop }, i) => ({ prop, order: kebabToOrder.get(twClassNames[i]) }))
+    .sort((a, b) => {
+      if (a.order === undefined && b.order === undefined) return 0;
+      if (a.order === undefined) return 1;
+      if (b.order === undefined) return -1;
+      return a.order < b.order ? -1 : a.order > b.order ? 1 : 0;
+    })
+    .map(({ prop }) => prop);
   const cssProperties = buildCssPropertyIndex(cssMap);
 
   const metadata = {
