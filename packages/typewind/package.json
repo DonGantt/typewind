@@ -9,7 +9,8 @@
     "dist/**/*.js",
     "dist/**/*.mjs",
     "dist/**/*.d.ts",
-    "dist/**/*.d.mts"
+    "dist/**/*.d.mts",
+    "src/turbopack-loader.cjs"
   ],
   "scripts": {
     "build": "tsup",
@@ -22,7 +23,8 @@
     "directory": "packages/typewind"
   },
   "bin": {
-    "typewind": "dist/cli.js"
+    "typewind": "dist/cli.js",
+    "typewind-classes": "dist/next-classes.js"
   },
   "exports": {
     ".": {
@@ -47,7 +49,8 @@
     "./transform": {
       "types": "./dist/transform.d.ts",
       "default": "./dist/transform.js"
-    }
+    },
+    "./turbopack-loader": "./src/turbopack-loader.cjs"
   },
   "keywords": [
     "typescript",

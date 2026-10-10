@@ -59,22 +59,36 @@ jobs:
       - name: Build
         run: npm run build --workspace packages/typewind
 
-      # Increment defaults to patch; pass a different bump by re-dispatching
-      # release-pr.yml manually and merging, or running release-it locally
-      # for a minor/major.
-      # release-it handles the version bump, git tag, and GitHub release; npm
-      # publishing itself is disabled here (packages/typewind/.release-it.json
-      # sets npm.publish: false) so the separate, environment-gated `publish`
-      # job below can publish via OIDC trusted publishing instead.
+      - name: Determine release-it increment mode
+        id: increment
+        working-directory: packages/typewind
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ "$LATEST_TAG" = "$PKG_VERSION" ]; then
+            echo "flag=--increment=patch" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=--no-increment" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Bump version, tag, and create GitHub release
         working-directory: packages/typewind
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release -- --ci --increment=patch
+        run: npm run release -- --ci ${{ steps.increment.outputs.flag }}
 
       - name: Capture new tag
         id: tag
         run: echo "tag=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+
+      - name: Sync version bump back into development
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch origin development --quiet
+          git checkout development
+          git merge main --no-edit
+          git push origin development
 
   publish:
     needs: release
