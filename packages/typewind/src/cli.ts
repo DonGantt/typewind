@@ -56,6 +56,43 @@ function resolveCssValue(value: string, themeMap: Map<string, string>, depth = 0
   return resolved;
 }
 
+function oklchToHex(lPercent: number, c: number, h: number): string {
+  const L = lPercent / 100;
+  const hRad = (h * Math.PI) / 180;
+  const a = c * Math.cos(hRad);
+  const b = c * Math.sin(hRad);
+
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+
+  const l = l_ ** 3;
+  const m = m_ ** 3;
+  const s = s_ ** 3;
+
+  const rLin = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const gLin = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const bLin = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+
+  const gamma = (channel: number) => {
+    const clamped = Math.max(0, Math.min(1, channel));
+    return clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+  };
+  const toByte = (channel: number) =>
+    Math.max(0, Math.min(255, Math.round(gamma(channel) * 255)));
+  const toHex = (n: number) => n.toString(16).padStart(2, '0');
+
+  return `#${toHex(toByte(rLin))}${toHex(toByte(gLin))}${toHex(toByte(bLin))}`;
+}
+
+function resolveColorToHex(value: string): string | null {
+  const match = value.match(
+    /oklch\(\s*([0-9.]+)%\s+([0-9.]+)\s+([0-9.]+)(?:\s*\/\s*[^)]+)?\s*\)/
+  );
+  if (!match) return null;
+  return oklchToHex(parseFloat(match[1]), parseFloat(match[2]), parseFloat(match[3]));
+}
+
 function normalizeToPx(value: string, rootFontSize: number): number | null {
   const remMatch = value.match(/^(-?[0-9.]+)rem$/);
   if (remMatch) return parseFloat(remMatch[1]) * rootFontSize;
@@ -161,11 +198,22 @@ function createDoc(
             return `${indent}${prop}: ${annotated};`;
           }
 
+          const directHex = resolveColorToHex(value);
+          if (directHex) {
+            return `${indent}${prop}: ${value}; /* ${directHex} *​/`;
+          }
+
           if (/var\(|calc\(/.test(value)) {
             const resolved = resolveCssValue(value.trim(), themeMap);
+
             const remMatch = resolved.match(/^(-?[0-9.]+)rem$/);
             if (remMatch) {
               return `${indent}${prop}: ${value}; /* ${parseFloat(remMatch[1]) * rootFontSize}px *​/`;
+            }
+
+            const resolvedHex = resolveColorToHex(resolved);
+            if (resolvedHex) {
+              return `${indent}${prop}: ${value}; /* ${resolvedHex} *​/`;
             }
           }
 
@@ -311,7 +359,8 @@ function buildTypeContent(
   cssMap: Map<string, string>,
   showPixelEquivalents: boolean,
   rootFontSize: number,
-  themeMap: Map<string, string>
+  themeMap: Map<string, string>,
+  bareNumericFamilies: string[]
 ): string {
   const opacityType =
     opacityValues.length > 0
@@ -332,6 +381,12 @@ function buildTypeContent(
       return baseType;
     })
     .join(';\n  ');
+
+  const bareNumericProps = bareNumericFamilies.map(fmtToTypewind).filter(isValidIdentifier);
+  const bareNumericIndexSignature =
+    bareNumericProps.length > 0
+      ? `[K: \`\${${bareNumericProps.map((p) => JSON.stringify(p)).join(' | ')}}_\${number}\`]: Property`
+      : '';
 
   // Build Arbitrary type: utility families that support arbitrary values
   const arbitraryProps = ARBITRARY_FAMILIES.map((family) => {
@@ -355,7 +410,7 @@ function buildTypeContent(
   return `type Property = Typewind & string;
 
 type Standard = {
-  ${standardProps}
+  ${standardProps}${bareNumericIndexSignature ? `;\n  ${bareNumericIndexSignature}` : ''}
 };
 
 type Arbitrary = {
@@ -384,7 +439,40 @@ export async function generateTypes() {
     themeMap.set(key, value);
   }
 
-  const classList = ctx.getClassList() as ClassEntry[];
+  const rawClassList = ctx.getClassList() as ClassEntry[];
+  const existingNames = new Set(rawClassList.map(([name]) => name));
+
+  const prefixCandidates = new Set<string>();
+  for (const [name] of rawClassList) {
+    if (name.startsWith('-') || /[.\[\/()]/.test(name)) continue;
+    const parts = name.split('-');
+    for (let i = 1; i < parts.length; i++) {
+      const prefix = parts.slice(0, i).join('-');
+      if (!existingNames.has(prefix)) prefixCandidates.add(prefix);
+    }
+  }
+  const prefixList = [...prefixCandidates];
+  const prefixCss = ctx.candidatesToCss(prefixList) as (string | null)[];
+  const bareDefaultEntries: ClassEntry[] = prefixList
+    .filter((_, i) => prefixCss[i])
+    .map((name) => [name, {}]);
+
+  const numericFamilyMax = new Map<string, number>();
+  for (const [name] of rawClassList) {
+    if (name.startsWith('-')) continue;
+    const m = name.match(/^([a-z]+(?:-[a-z]+)*)-(\d+)$/);
+    if (!m) continue;
+    const n = Number(m[2]);
+    if (!numericFamilyMax.has(m[1]) || numericFamilyMax.get(m[1])! < n) {
+      numericFamilyMax.set(m[1], n);
+    }
+  }
+  const numericFamilyNames = [...numericFamilyMax.keys()];
+  const numericProbes = numericFamilyNames.map((f) => `${f}-${numericFamilyMax.get(f)! + 54321}`);
+  const numericProbeCss = ctx.candidatesToCss(numericProbes) as (string | null)[];
+  const bareNumericFamilies = numericFamilyNames.filter((_, i) => numericProbeCss[i]);
+
+  const classList = [...rawClassList, ...bareDefaultEntries];
   const { standard: standardClasses } = processClassList(classList);
 
   const rawVariants = ctx.getVariants() as {
@@ -450,6 +538,7 @@ export async function generateTypes() {
     config.showPixelEquivalents,
     config.rootFontSize,
     themeMap,
+    bareNumericFamilies,
   );
 
   const typewindDistDir = path.dirname(require.resolve('typewind-v4'));

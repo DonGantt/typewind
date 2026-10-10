@@ -23,7 +23,7 @@ function loadConfig() {
   }
   return {
     cssEntry: "",
-    showPixelEquivalents: false,
+    showPixelEquivalents: true,
     rootFontSize: 16,
     ...pkg?.typewind
   };
@@ -189,6 +189,35 @@ function resolveCssValue(value, themeMap, depth = 0) {
   );
   return resolved;
 }
+function oklchToHex(lPercent, c, h) {
+  const L = lPercent / 100;
+  const hRad = h * Math.PI / 180;
+  const a = c * Math.cos(hRad);
+  const b = c * Math.sin(hRad);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ ** 3;
+  const m = m_ ** 3;
+  const s = s_ ** 3;
+  const rLin = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+  const gLin = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+  const bLin = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
+  const gamma = (channel) => {
+    const clamped = Math.max(0, Math.min(1, channel));
+    return clamped <= 31308e-7 ? 12.92 * clamped : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+  };
+  const toByte = (channel) => Math.max(0, Math.min(255, Math.round(gamma(channel) * 255)));
+  const toHex = (n) => n.toString(16).padStart(2, "0");
+  return `#${toHex(toByte(rLin))}${toHex(toByte(gLin))}${toHex(toByte(bLin))}`;
+}
+function resolveColorToHex(value) {
+  const match = value.match(
+    /oklch\(\s*([0-9.]+)%\s+([0-9.]+)\s+([0-9.]+)(?:\s*\/\s*[^)]+)?\s*\)/
+  );
+  if (!match) return null;
+  return oklchToHex(parseFloat(match[1]), parseFloat(match[2]), parseFloat(match[3]));
+}
 function normalizeToPx(value, rootFontSize) {
   const remMatch = value.match(/^(-?[0-9.]+)rem$/);
   if (remMatch) return parseFloat(remMatch[1]) * rootFontSize;
@@ -268,11 +297,19 @@ function createDoc(css, showPixelEquivalents, rootFontSize, themeMap) {
           if (annotated !== value) {
             return `${indent}${prop}: ${annotated};`;
           }
+          const directHex = resolveColorToHex(value);
+          if (directHex) {
+            return `${indent}${prop}: ${value}; /* ${directHex} *\u200B/`;
+          }
           if (/var\(|calc\(/.test(value)) {
             const resolved = resolveCssValue(value.trim(), themeMap);
             const remMatch = resolved.match(/^(-?[0-9.]+)rem$/);
             if (remMatch) {
               return `${indent}${prop}: ${value}; /* ${parseFloat(remMatch[1]) * rootFontSize}px *\u200B/`;
+            }
+            const resolvedHex = resolveColorToHex(resolved);
+            if (resolvedHex) {
+              return `${indent}${prop}: ${value}; /* ${resolvedHex} *\u200B/`;
             }
           }
           return match;
@@ -495,7 +532,7 @@ function processClassList(classList) {
   }
   return { standard, colorProps };
 }
-function buildTypeContent(standardClasses, variantNames, opacityValues, cssMap, showPixelEquivalents, rootFontSize, themeMap) {
+function buildTypeContent(standardClasses, variantNames, opacityValues, cssMap, showPixelEquivalents, rootFontSize, themeMap, bareNumericFamilies) {
   const opacityType = opacityValues.length > 0 ? opacityValues.map((v) => JSON.stringify(v)).join(" | ") : "string";
   const colorModifierMap = `{ [K in ${opacityType}]: Property } & Record<string, Property>`;
   const standardProps = standardClasses.map(({ prop, isColor }) => {
@@ -508,6 +545,8 @@ function buildTypeContent(standardClasses, variantNames, opacityValues, cssMap, 
     }
     return baseType;
   }).join(";\n  ");
+  const bareNumericProps = bareNumericFamilies.map(fmtToTypewind).filter(isValidIdentifier);
+  const bareNumericIndexSignature = bareNumericProps.length > 0 ? `[K: \`\${${bareNumericProps.map((p) => JSON.stringify(p)).join(" | ")}}_\${number}\`]: Property` : "";
   const arbitraryProps = ARBITRARY_FAMILIES.map((family) => {
     const prop = fmtToTypewind(family) + "_";
     return `"${prop}": Record<string, Property>`;
@@ -521,7 +560,8 @@ function buildTypeContent(standardClasses, variantNames, opacityValues, cssMap, 
   return `type Property = Typewind & string;
 
 type Standard = {
-  ${standardProps}
+  ${standardProps}${bareNumericIndexSignature ? `;
+  ${bareNumericIndexSignature}` : ""}
 };
 
 type Arbitrary = {
@@ -547,7 +587,35 @@ async function generateTypes() {
   for (const [key, { value }] of ctx.theme.entries()) {
     themeMap.set(key, value);
   }
-  const classList = ctx.getClassList();
+  const rawClassList = ctx.getClassList();
+  const existingNames = new Set(rawClassList.map(([name]) => name));
+  const prefixCandidates = /* @__PURE__ */ new Set();
+  for (const [name] of rawClassList) {
+    if (name.startsWith("-") || /[.\[\/()]/.test(name)) continue;
+    const parts = name.split("-");
+    for (let i = 1; i < parts.length; i++) {
+      const prefix = parts.slice(0, i).join("-");
+      if (!existingNames.has(prefix)) prefixCandidates.add(prefix);
+    }
+  }
+  const prefixList = [...prefixCandidates];
+  const prefixCss = ctx.candidatesToCss(prefixList);
+  const bareDefaultEntries = prefixList.filter((_, i) => prefixCss[i]).map((name) => [name, {}]);
+  const numericFamilyMax = /* @__PURE__ */ new Map();
+  for (const [name] of rawClassList) {
+    if (name.startsWith("-")) continue;
+    const m = name.match(/^([a-z]+(?:-[a-z]+)*)-(\d+)$/);
+    if (!m) continue;
+    const n = Number(m[2]);
+    if (!numericFamilyMax.has(m[1]) || numericFamilyMax.get(m[1]) < n) {
+      numericFamilyMax.set(m[1], n);
+    }
+  }
+  const numericFamilyNames = [...numericFamilyMax.keys()];
+  const numericProbes = numericFamilyNames.map((f) => `${f}-${numericFamilyMax.get(f) + 54321}`);
+  const numericProbeCss = ctx.candidatesToCss(numericProbes);
+  const bareNumericFamilies = numericFamilyNames.filter((_, i) => numericProbeCss[i]);
+  const classList = [...rawClassList, ...bareDefaultEntries];
   const { standard: standardClasses } = processClassList(classList);
   const rawVariants = ctx.getVariants();
   const variantNames = rawVariants.map((v) => v.name);
@@ -598,7 +666,8 @@ async function generateTypes() {
     cssMap,
     config.showPixelEquivalents,
     config.rootFontSize,
-    themeMap
+    themeMap,
+    bareNumericFamilies
   );
   const typewindDistDir = path2.dirname(__require.resolve("typewind-v4"));
   fs2.writeFileSync(path2.join(typewindDistDir, "index.d.ts"), typeContent, "utf8");
