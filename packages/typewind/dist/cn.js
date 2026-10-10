@@ -28,6 +28,7 @@ var import_tailwind_merge = require("tailwind-merge");
 
 // src/runtime.ts
 var knownClasses = /* @__PURE__ */ new Set();
+var variants = /* @__PURE__ */ new Set();
 try {
   if (typeof require !== "undefined" && typeof __dirname !== "undefined") {
     const _fs = require("fs");
@@ -36,6 +37,7 @@ try {
     if (_fs.existsSync(metaPath)) {
       const meta = JSON.parse(_fs.readFileSync(metaPath, "utf8"));
       if (Array.isArray(meta.classSet)) knownClasses = new Set(meta.classSet);
+      if (Array.isArray(meta.variants)) variants = new Set(meta.variants);
     }
   }
 } catch {

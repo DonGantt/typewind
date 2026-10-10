@@ -1,5 +1,5 @@
 const fmtToTailwind = (s: string) =>
-  s.replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
+  s.replace(/__/g, '.').replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
 
 // Tailwind's color scale only ships under the "gray" spelling. Users who
 // write "grey" (either via the typed `tw.bg_grey_500` alias generated in
@@ -9,9 +9,11 @@ const greyToGray = (s: string) => s.replace(/(^|-)grey(?=-|$)/g, '$1gray');
 
 type ToStringable = { toString(): string };
 
-// Named Tailwind class set for smart arbitrary-value lookup.
-// Loaded from _metadata.json in Node/SSR; stays empty in the browser.
+// Named Tailwind class set for smart arbitrary-value lookup, and the variant
+// name set used to validate `*_named` base names (mirrors evaluate.ts).
+// Both loaded from _metadata.json in Node/SSR; stay empty in the browser.
 let knownClasses = new Set<string>();
+let variants = new Set<string>();
 try {
   if (typeof require !== 'undefined' && typeof __dirname !== 'undefined') {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -22,6 +24,7 @@ try {
     if (_fs.existsSync(metaPath)) {
       const meta = JSON.parse(_fs.readFileSync(metaPath, 'utf8'));
       if (Array.isArray(meta.classSet)) knownClasses = new Set(meta.classSet);
+      if (Array.isArray(meta.variants)) variants = new Set(meta.variants);
     }
   }
 } catch {
@@ -87,6 +90,20 @@ export function createRuntimeTw() {
             target.maybeVariant = undefined;
           }
 
+          if (p === 'is_group' || p === 'is_peer') {
+            target.classes.add(p === 'is_group' ? 'group' : 'peer');
+            target.prevProp = name;
+            return thisTw;
+          }
+
+          if (p === 'is_group_named' || p === 'is_peer_named') {
+            const base = p === 'is_group_named' ? 'group' : 'peer';
+            return (groupName: string) => {
+              target.classes.add(`${base}/${groupName}`);
+              return thisTw;
+            };
+          }
+
           if (name === 'raw') {
             return (style: ToStringable) => {
               spreadModifier('', style);
@@ -106,6 +123,25 @@ export function createRuntimeTw() {
               spreadModifier('!', style);
               return thisTw;
             };
+          }
+
+          // "*"/"**" (direct children / all descendants) aren't valid JS
+          // identifiers, so cli.ts generates them as children(...)/descendants(...).
+          if (p === 'children' || p === 'descendants') {
+            target.maybeVariant = p === 'children' ? '*' : '**';
+            return thisTw;
+          }
+
+          // group-*/peer-* compound variants also accept a named form:
+          // group_hover_named('sidebar', style) -> "group-hover/sidebar:style".
+          if (p.endsWith('_named')) {
+            const baseName = fmtToTailwind(p.slice(0, -'_named'.length));
+            if (variants.has(baseName)) {
+              return (groupName: string, style: ToStringable) => {
+                spreadModifier(`${baseName}/${groupName}:`, style);
+                return thisTw;
+              };
+            }
           }
 
           target.maybeVariant = name;

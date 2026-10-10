@@ -282,13 +282,22 @@ const ARBITRARY_FAMILIES = [
   'outline-offset',
   // Perspective
   'perspective',
+  // Transitions / filters / misc
+  'transition', 'content', 'mask', 'will-change', 'cursor', 'line-clamp',
+  'backdrop-filter', 'filter', 'origin',
 ];
 
+// Decimal spacing steps (0.5, 1.5, 2.5, 3.5) can't appear in a JS identifier
+// as a literal dot, and "_"/"$" are already claimed for "-"/"@"/"/" below, so
+// "." round-trips through "__" (a sequence that never otherwise occurs, since
+// it would require two adjacent hyphens or an empty class-name segment).
+// Fractions (w-1/3) reuse the existing "/" <-> "$" encoding fmtToTailwind
+// already decodes, so e.g. "w-1/3" <-> "w_1$3".
 const fmtToTypewind = (s: string) =>
-  s.replace(/-/g, '_').replace(/^\@/, '$');
+  s.replace(/\./g, '__').replace(/-/g, '_').replace(/^\@/, '$').replace(/\//g, '$');
 
 const fmtToTailwind = (s: string) =>
-  s.replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
+  s.replace(/__/g, '.').replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
 
 function isValidIdentifier(s: string): boolean {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s);
@@ -315,8 +324,11 @@ function processClassList(classList: ClassEntry[]): {
   const seen = new Set<string>();
 
   for (const [name, meta] of classList) {
-    // Skip classes with special characters (arbitrary/fractional/dot-decimal)
-    if (/[.\[\/()]/.test(name)) continue;
+    // Skip classes with special characters (arbitrary values). Decimal
+    // spacing steps (the dot in "mt-0.5") and fractions (the slash in
+    // "w-1/3") are handled by fmtToTypewind's "." <-> "__" and "/" <-> "$"
+    // encodings, so dots and slashes are allowed through.
+    if (/[\[()]/.test(name)) continue;
 
     let prop: string;
     if (name.startsWith('-')) {
@@ -360,7 +372,8 @@ function buildTypeContent(
   showPixelEquivalents: boolean,
   rootFontSize: number,
   themeMap: Map<string, string>,
-  bareNumericFamilies: string[]
+  negativeArbitraryFamilies: string[],
+  noDocProps: Set<string>
 ): string {
   const opacityType =
     opacityValues.length > 0
@@ -372,7 +385,7 @@ function buildTypeContent(
   // Build Standard type: all specific classes
   const standardProps = standardClasses
     .map(({ prop, isColor }) => {
-      const css = cssMap.get(prop);
+      const css = noDocProps.has(prop) ? undefined : cssMap.get(prop);
       const doc = css ? `/** ${createDoc(css, showPixelEquivalents, rootFontSize, themeMap)} */\n  ` : '';
       const baseType = `${doc}"${prop}": Property`;
       if (isColor) {
@@ -380,29 +393,50 @@ function buildTypeContent(
       }
       return baseType;
     })
+    .concat([
+      // `group`/`peer` are marker classes with no generated CSS (Tailwind
+      // doesn't list them in getClassList, so they can't be discovered the
+      // way other utilities are) and the bare names are already taken by the
+      // group(style)/peer(style) variant functions below, so the marker
+      // itself gets its own typed property.
+      '/** The `group` marker class — gives descendants a target for `group-*` variants. */\n  "is_group": Property',
+      '/** The `peer` marker class — gives following siblings a target for `peer-*` variants. */\n  "is_peer": Property',
+    ])
     .join(';\n  ');
 
-  const bareNumericProps = bareNumericFamilies.map(fmtToTypewind).filter(isValidIdentifier);
-  const bareNumericIndexSignature =
-    bareNumericProps.length > 0
-      ? `[K: \`\${${bareNumericProps.map((p) => JSON.stringify(p)).join(' | ')}}_\${number}\`]: Property`
-      : '';
-
-  // Build Arbitrary type: utility families that support arbitrary values
-  const arbitraryProps = ARBITRARY_FAMILIES.map((family) => {
+  // Build Arbitrary type: utility families that support arbitrary values.
+  // Families that also have a negative class form (e.g. -mt-4) accept a
+  // negative arbitrary form too (-mt-[0.2px]) — already compiles correctly
+  // via the same generic "_"-prefixed trailing-hyphen mechanism as the
+  // positive form, this just needed the matching typed property.
+  const arbitraryProps = ARBITRARY_FAMILIES.flatMap((family) => {
     const prop = fmtToTypewind(family) + '_';
-    return `"${prop}": Record<string, Property>`;
+    const entries = [`"${prop}": Record<string, Property>`];
+    if (negativeArbitraryFamilies.includes(family)) {
+      entries.push(`"_${prop}": Record<string, Property>`);
+    }
+    return entries;
   }).join(';\n  ');
 
-  // Build modifier methods
+  // Build modifier methods.
+  // "*" (direct children) and "**" (all descendants) aren't valid JS
+  // identifiers, so they get readable names instead; evaluate.ts/runtime.ts
+  // map them back to the literal Tailwind variant.
+  const STAR_VARIANT_PROPS: Record<string, string> = { '*': 'children', '**': 'descendants' };
   const modifierMethods = variantNames
-    .filter((name) => !['*', '**'].includes(name))
     .map((name) => {
-      let prop = fmtToTypewind(name);
+      let prop = STAR_VARIANT_PROPS[name] ?? fmtToTypewind(name);
       // Prefix digit-starting names with _
       prop = /^\d/.test(prop) ? `_${prop}` : prop;
       if (!isValidIdentifier(prop)) return null;
-      return `${prop}(style: Property): Property`;
+      const base = `${prop}(style: Property): Property`;
+      // group-*/peer-* variants (group-hover, peer-focus, ...) also accept a
+      // named form (group-hover/sidebar:...) for scoping to a specific named
+      // group/peer marker rather than the nearest ancestor.
+      if (/^(group|peer)-/.test(name)) {
+        return `${base};\n  ${prop}_named(name: string, style: Property): Property`;
+      }
+      return base;
     })
     .filter(Boolean)
     .join(';\n  ');
@@ -410,7 +444,7 @@ function buildTypeContent(
   return `type Property = Typewind & string;
 
 type Standard = {
-  ${standardProps}${bareNumericIndexSignature ? `;\n  ${bareNumericIndexSignature}` : ''}
+  ${standardProps}
 };
 
 type Arbitrary = {
@@ -422,6 +456,10 @@ type Typewind = Standard & Arbitrary & {
   important(style: Property): Property;
   variant<T extends \`&\${string}\` | \`@\${string}\`>(variant: T, style: Property | string): Property;
   raw(style: string): Property;
+  /** The named \`group/name\` marker class — scopes \`group-*_named(name, ...)\` variants to this specific group. */
+  is_group_named(name: string): Property;
+  /** The named \`peer/name\` marker class — scopes \`peer-*_named(name, ...)\` variants to this specific peer. */
+  is_peer_named(name: string): Property;
 }
 
 declare const tw: Typewind;
@@ -457,22 +495,74 @@ export async function generateTypes() {
     .filter((_, i) => prefixCss[i])
     .map((name) => [name, {}]);
 
-  const numericFamilyMax = new Map<string, number>();
-  for (const [name] of rawClassList) {
-    if (name.startsWith('-')) continue;
-    const m = name.match(/^([a-z]+(?:-[a-z]+)*)-(\d+)$/);
-    if (!m) continue;
-    const n = Number(m[2]);
-    if (!numericFamilyMax.has(m[1]) || numericFamilyMax.get(m[1])! < n) {
-      numericFamilyMax.set(m[1], n);
+  // Self-extending numeric support: rather than pre-generating every bare
+  // number/decimal/fraction Tailwind could theoretically accept (tried this —
+  // it produced a 72,900-definition, 24MB d.ts that measurably slowed real
+  // tsc/eslint runs, since the cost scales with definition count, not file
+  // bytes), scan the project's own source for tw.<identifier> accesses that
+  // don't already exist, decode each candidate back to a real Tailwind class
+  // name via fmtToTailwind, and only type the ones actually used AND valid.
+  // This keeps the type surface at "what this project uses" instead of
+  // "everything Tailwind could ever accept" — near-zero added cost either way.
+  const IGNORE_SCAN_DIRS = new Set([
+    'node_modules', 'dist', 'build', '.git', '.next', '.vite', 'vendor',
+    '.turbo', '.cache', 'coverage', 'out',
+  ]);
+  const SCAN_EXTS = ['.tsx', '.ts', '.jsx', '.js'];
+  function collectScanFiles(dir: string, out: string[] = []): string[] {
+    let entries: import('fs').Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return out;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!IGNORE_SCAN_DIRS.has(entry.name)) collectScanFiles(full, out);
+      } else if (SCAN_EXTS.some((ext) => entry.name.endsWith(ext))) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+
+  const usedIdentifiers = new Set<string>();
+  for (const file of collectScanFiles(process.cwd())) {
+    let code: string;
+    try {
+      code = fs.readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    // Cheap pre-filter before the regex below: skip files that can't
+    // possibly reference tw.* at all. Checking for a literal "tw." (rather
+    // than requiring the typewind-v4 import itself) also covers projects
+    // that re-export `tw` from a shared wrapper module, where the consuming
+    // file never mentions "typewind-v4" directly.
+    if (!code.includes('typewind-v4') && !code.includes("from 'typewind'") && !code.includes('tw.')) continue;
+    // Only identifiers containing a digit can possibly be a numeric
+    // extension (min_w_440, z_10000, w_1$9, _left_10__75); this skips
+    // probing every ordinary method/property access in the file.
+    for (const match of code.matchAll(/\.([a-zA-Z_$][a-zA-Z0-9_$]*\d[a-zA-Z0-9_$]*)/g)) {
+      usedIdentifiers.add(match[1]);
     }
   }
-  const numericFamilyNames = [...numericFamilyMax.keys()];
-  const numericProbes = numericFamilyNames.map((f) => `${f}-${numericFamilyMax.get(f)! + 54321}`);
-  const numericProbeCss = ctx.candidatesToCss(numericProbes) as (string | null)[];
-  const bareNumericFamilies = numericFamilyNames.filter((_, i) => numericProbeCss[i]);
 
-  const classList = [...rawClassList, ...bareDefaultEntries];
+  const numericCandidates = [...usedIdentifiers]
+    .map((ident) => fmtToTailwind(ident))
+    .filter((name) => !existingNames.has(name));
+  const numericCss = numericCandidates.length
+    ? (ctx.candidatesToCss(numericCandidates) as (string | null)[])
+    : [];
+  const numericEntries: ClassEntry[] = numericCandidates
+    .filter((_, i) => numericCss[i])
+    .map((name) => [name, {}]);
+  // Bulk-generated numeric entries skip JSDoc generation (see buildTypeContent)
+  // to keep per-entry cost minimal even though the set itself is now small.
+  const noDocProps = new Set(numericEntries.map(([name]) => fmtToTypewind(name)));
+
+  const classList = [...rawClassList, ...bareDefaultEntries, ...numericEntries];
   const { standard: standardClasses } = processClassList(classList);
 
   const rawVariants = ctx.getVariants() as {
@@ -494,15 +584,16 @@ export async function generateTypes() {
     `@min-${size}`,
   ]);
 
-  // Expand peer-* and group-* compound variants from their values lists
-  const peerValues = rawVariants.find((v) => v.name === 'peer')?.values ?? [];
-  const groupValues = rawVariants.find((v) => v.name === 'group')?.values ?? [];
-  const peerGroupVariants = [
-    ...peerValues.map((v) => `peer-${v}`),
-    ...groupValues.map((v) => `group-${v}`),
-  ];
+  // Every other parameterized variant (peer-hover, group-focus, max-xl,
+  // min-sm, not-hover, in-focus, has-checked, aria-busy, ...) compounds the
+  // same way: `${name}-${value}`. The "@" container-query family is excluded
+  // since it's handled above with its own breakpoint-filtering and 3-form
+  // (@size/@max-size/@min-size) expansion.
+  const compoundVariants = rawVariants
+    .filter((v) => v.values?.length > 0 && v.name !== '@' && v.name !== '@max' && v.name !== '@min')
+    .flatMap((v) => v.values.map((value) => `${v.name}-${value}`));
 
-  const variants = [...new Set([...variantNames, ...containerVariants, ...peerGroupVariants])];
+  const variants = [...new Set([...variantNames, ...containerVariants, ...compoundVariants])];
 
   // Extract opacity scale from modifier values on color classes
   const opacityValues: string[] = [];
@@ -530,6 +621,10 @@ export async function generateTypes() {
     if (css) cssMap.set(standardClasses[i].prop, css);
   }
 
+  const negativeArbitraryProbes = ARBITRARY_FAMILIES.map((family) => `-${family}-[0.2px]`);
+  const negativeArbitraryCss = ctx.candidatesToCss(negativeArbitraryProbes) as (string | null)[];
+  const negativeArbitraryFamilies = ARBITRARY_FAMILIES.filter((_, i) => negativeArbitraryCss[i]);
+
   const typeContent = buildTypeContent(
     standardClasses,
     variants,
@@ -538,7 +633,8 @@ export async function generateTypes() {
     config.showPixelEquivalents,
     config.rootFontSize,
     themeMap,
-    bareNumericFamilies,
+    negativeArbitraryFamilies,
+    noDocProps,
   );
 
   const typewindDistDir = path.dirname(require.resolve('typewind-v4'));
@@ -566,15 +662,21 @@ export async function generateTypes() {
   for (const [kebab, pos] of classOrderPairs) {
     if (pos !== null) kebabToOrder.set(kebab, pos);
   }
-  const classOrder = standardClasses
-    .map(({ prop }, i) => ({ prop, order: kebabToOrder.get(twClassNames[i]) }))
-    .sort((a, b) => {
-      if (a.order === undefined && b.order === undefined) return 0;
-      if (a.order === undefined) return 1;
-      if (b.order === undefined) return -1;
-      return a.order < b.order ? -1 : a.order > b.order ? 1 : 0;
-    })
-    .map(({ prop }) => prop);
+  const classOrder = [
+    // `group`/`peer` have no generated CSS, so Tailwind's own getClassOrder
+    // has no opinion on where they sort — conventionally written first.
+    'is_group',
+    'is_peer',
+    ...standardClasses
+      .map(({ prop }, i) => ({ prop, order: kebabToOrder.get(twClassNames[i]) }))
+      .sort((a, b) => {
+        if (a.order === undefined && b.order === undefined) return 0;
+        if (a.order === undefined) return 1;
+        if (b.order === undefined) return -1;
+        return a.order < b.order ? -1 : a.order > b.order ? 1 : 0;
+      })
+      .map(({ prop }) => prop),
+  ];
   const cssProperties = buildCssPropertyIndex(cssMap);
 
   const metadata = {

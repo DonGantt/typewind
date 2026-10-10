@@ -172,7 +172,7 @@ try {
   }
 } catch {
 }
-var fmtToTailwind = (s) => s.replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/, "/");
+var fmtToTailwind = (s) => s.replace(/__/g, ".").replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/, "/");
 var greyToGray = (s) => s.replace(/(^|-)grey(?=-|$)/g, "$1gray");
 var createTw = () => {
   const twUsed = (classes = /* @__PURE__ */ new Set()) => {
@@ -202,11 +202,33 @@ var createTw = () => {
             return thisTw;
           };
           var spreadModifier = spreadModifier2;
+          if (p === "is_group" || p === "is_peer") {
+            t.classes.add(p === "is_group" ? "group" : "peer");
+            t.prevProp = name;
+            return thisTw;
+          }
+          if (p === "is_group_named" || p === "is_peer_named") {
+            const base = p === "is_group_named" ? "group" : "peer";
+            return (groupName) => {
+              t.classes.add(`${base}/${groupName}`);
+              return thisTw;
+            };
+          }
           if (name === "raw") {
             return (style) => spreadModifier2("", style);
           }
           if (name === "variant") {
             return (modifier, classes2) => spreadModifier2(`[${modifier}]:`, classes2);
+          }
+          const starVariant = p === "children" ? "*" : p === "descendants" ? "**" : null;
+          if (starVariant) {
+            return (arg) => spreadModifier2(`${starVariant}:`, arg);
+          }
+          if (p.endsWith("_named")) {
+            const baseName = fmtToTailwind(p.slice(0, -"_named".length));
+            if (variants.has(baseName)) {
+              return (groupName, arg) => spreadModifier2(`${baseName}/${groupName}:`, arg);
+            }
           }
           if (variants.has(name) || name === "important") {
             const prefix = name === "important" ? "!" : `${name}:`;

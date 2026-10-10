@@ -6,9 +6,10 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 });
 
 // src/runtime.ts
-var fmtToTailwind = (s) => s.replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/, "/");
+var fmtToTailwind = (s) => s.replace(/__/g, ".").replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/, "/");
 var greyToGray = (s) => s.replace(/(^|-)grey(?=-|$)/g, "$1gray");
 var knownClasses = /* @__PURE__ */ new Set();
+var variants = /* @__PURE__ */ new Set();
 try {
   if (typeof __require !== "undefined" && typeof __dirname !== "undefined") {
     const _fs = __require("fs");
@@ -17,6 +18,7 @@ try {
     if (_fs.existsSync(metaPath)) {
       const meta = JSON.parse(_fs.readFileSync(metaPath, "utf8"));
       if (Array.isArray(meta.classSet)) knownClasses = new Set(meta.classSet);
+      if (Array.isArray(meta.variants)) variants = new Set(meta.variants);
     }
   }
 } catch {
@@ -70,6 +72,18 @@ function createRuntimeTw() {
             target2.classes.add(target2.maybeVariant);
             target2.maybeVariant = void 0;
           }
+          if (p === "is_group" || p === "is_peer") {
+            target2.classes.add(p === "is_group" ? "group" : "peer");
+            target2.prevProp = name;
+            return thisTw;
+          }
+          if (p === "is_group_named" || p === "is_peer_named") {
+            const base = p === "is_group_named" ? "group" : "peer";
+            return (groupName) => {
+              target2.classes.add(`${base}/${groupName}`);
+              return thisTw;
+            };
+          }
           if (name === "raw") {
             return (style) => {
               spreadModifier("", style);
@@ -87,6 +101,19 @@ function createRuntimeTw() {
               spreadModifier("!", style);
               return thisTw;
             };
+          }
+          if (p === "children" || p === "descendants") {
+            target2.maybeVariant = p === "children" ? "*" : "**";
+            return thisTw;
+          }
+          if (p.endsWith("_named")) {
+            const baseName = fmtToTailwind(p.slice(0, -"_named".length));
+            if (variants.has(baseName)) {
+              return (groupName, style) => {
+                spreadModifier(`${baseName}/${groupName}:`, style);
+                return thisTw;
+              };
+            }
           }
           target2.maybeVariant = name;
         }
