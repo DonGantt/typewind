@@ -493,10 +493,20 @@ var ARBITRARY_FAMILIES = [
   // Outline
   "outline-offset",
   // Perspective
-  "perspective"
+  "perspective",
+  // Transitions / filters / misc
+  "transition",
+  "content",
+  "mask",
+  "will-change",
+  "cursor",
+  "line-clamp",
+  "backdrop-filter",
+  "filter",
+  "origin"
 ];
-var fmtToTypewind = (s) => s.replace(/-/g, "_").replace(/^\@/, "$");
-var fmtToTailwind = (s) => s.replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/, "/");
+var fmtToTypewind = (s) => s.replace(/\./g, "__").replace(/-/g, "_").replace(/^\@/, "$").replace(/\//g, "$");
+var fmtToTailwind = (s) => s.replace(/__/g, ".").replace(/_/g, "-").replace(/^\$/, "@").replace(/\$/, "/");
 function isValidIdentifier(s) {
   return /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(s);
 }
@@ -509,7 +519,7 @@ function processClassList(classList) {
   const colorProps = /* @__PURE__ */ new Set();
   const seen = /* @__PURE__ */ new Set();
   for (const [name, meta] of classList) {
-    if (/[.\[\/()]/.test(name)) continue;
+    if (/[\[()]/.test(name)) continue;
     let prop;
     if (name.startsWith("-")) {
       prop = fmtToTypewind(name);
@@ -532,11 +542,11 @@ function processClassList(classList) {
   }
   return { standard, colorProps };
 }
-function buildTypeContent(standardClasses, variantNames, opacityValues, cssMap, showPixelEquivalents, rootFontSize, themeMap, bareNumericFamilies) {
+function buildTypeContent(standardClasses, variantNames, opacityValues, cssMap, showPixelEquivalents, rootFontSize, themeMap, negativeArbitraryFamilies, noDocProps) {
   const opacityType = opacityValues.length > 0 ? opacityValues.map((v) => JSON.stringify(v)).join(" | ") : "string";
   const colorModifierMap = `{ [K in ${opacityType}]: Property } & Record<string, Property>`;
   const standardProps = standardClasses.map(({ prop, isColor }) => {
-    const css = cssMap.get(prop);
+    const css = noDocProps.has(prop) ? void 0 : cssMap.get(prop);
     const doc = css ? `/** ${createDoc(css, showPixelEquivalents, rootFontSize, themeMap)} */
   ` : "";
     const baseType = `${doc}"${prop}": Property`;
@@ -544,24 +554,39 @@ function buildTypeContent(standardClasses, variantNames, opacityValues, cssMap, 
       return `${baseType}; "${prop}$": ${colorModifierMap}`;
     }
     return baseType;
-  }).join(";\n  ");
-  const bareNumericProps = bareNumericFamilies.map(fmtToTypewind).filter(isValidIdentifier);
-  const bareNumericIndexSignature = bareNumericProps.length > 0 ? `[K: \`\${${bareNumericProps.map((p) => JSON.stringify(p)).join(" | ")}}_\${number}\`]: Property` : "";
-  const arbitraryProps = ARBITRARY_FAMILIES.map((family) => {
+  }).concat([
+    // `group`/`peer` are marker classes with no generated CSS (Tailwind
+    // doesn't list them in getClassList, so they can't be discovered the
+    // way other utilities are) and the bare names are already taken by the
+    // group(style)/peer(style) variant functions below, so the marker
+    // itself gets its own typed property.
+    '/** The `group` marker class \u2014 gives descendants a target for `group-*` variants. */\n  "is_group": Property',
+    '/** The `peer` marker class \u2014 gives following siblings a target for `peer-*` variants. */\n  "is_peer": Property'
+  ]).join(";\n  ");
+  const arbitraryProps = ARBITRARY_FAMILIES.flatMap((family) => {
     const prop = fmtToTypewind(family) + "_";
-    return `"${prop}": Record<string, Property>`;
+    const entries = [`"${prop}": Record<string, Property>`];
+    if (negativeArbitraryFamilies.includes(family)) {
+      entries.push(`"_${prop}": Record<string, Property>`);
+    }
+    return entries;
   }).join(";\n  ");
-  const modifierMethods = variantNames.filter((name) => !["*", "**"].includes(name)).map((name) => {
-    let prop = fmtToTypewind(name);
+  const STAR_VARIANT_PROPS = { "*": "children", "**": "descendants" };
+  const modifierMethods = variantNames.map((name) => {
+    let prop = STAR_VARIANT_PROPS[name] ?? fmtToTypewind(name);
     prop = /^\d/.test(prop) ? `_${prop}` : prop;
     if (!isValidIdentifier(prop)) return null;
-    return `${prop}(style: Property): Property`;
+    const base = `${prop}(style: Property): Property`;
+    if (/^(group|peer)-/.test(name)) {
+      return `${base};
+  ${prop}_named(name: string, style: Property): Property`;
+    }
+    return base;
   }).filter(Boolean).join(";\n  ");
   return `type Property = Typewind & string;
 
 type Standard = {
-  ${standardProps}${bareNumericIndexSignature ? `;
-  ${bareNumericIndexSignature}` : ""}
+  ${standardProps}
 };
 
 type Arbitrary = {
@@ -573,6 +598,10 @@ type Typewind = Standard & Arbitrary & {
   important(style: Property): Property;
   variant<T extends \`&\${string}\` | \`@\${string}\`>(variant: T, style: Property | string): Property;
   raw(style: string): Property;
+  /** The named \`group/name\` marker class \u2014 scopes \`group-*_named(name, ...)\` variants to this specific group. */
+  is_group_named(name: string): Property;
+  /** The named \`peer/name\` marker class \u2014 scopes \`peer-*_named(name, ...)\` variants to this specific peer. */
+  is_peer_named(name: string): Property;
 }
 
 declare const tw: Typewind;
@@ -601,21 +630,55 @@ async function generateTypes() {
   const prefixList = [...prefixCandidates];
   const prefixCss = ctx.candidatesToCss(prefixList);
   const bareDefaultEntries = prefixList.filter((_, i) => prefixCss[i]).map((name) => [name, {}]);
-  const numericFamilyMax = /* @__PURE__ */ new Map();
-  for (const [name] of rawClassList) {
-    if (name.startsWith("-")) continue;
-    const m = name.match(/^([a-z]+(?:-[a-z]+)*)-(\d+)$/);
-    if (!m) continue;
-    const n = Number(m[2]);
-    if (!numericFamilyMax.has(m[1]) || numericFamilyMax.get(m[1]) < n) {
-      numericFamilyMax.set(m[1], n);
+  const IGNORE_SCAN_DIRS = /* @__PURE__ */ new Set([
+    "node_modules",
+    "dist",
+    "build",
+    ".git",
+    ".next",
+    ".vite",
+    "vendor",
+    ".turbo",
+    ".cache",
+    "coverage",
+    "out"
+  ]);
+  const SCAN_EXTS = [".tsx", ".ts", ".jsx", ".js"];
+  function collectScanFiles(dir, out = []) {
+    let entries;
+    try {
+      entries = fs2.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return out;
+    }
+    for (const entry of entries) {
+      const full = path2.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!IGNORE_SCAN_DIRS.has(entry.name)) collectScanFiles(full, out);
+      } else if (SCAN_EXTS.some((ext) => entry.name.endsWith(ext))) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+  const usedIdentifiers = /* @__PURE__ */ new Set();
+  for (const file of collectScanFiles(process.cwd())) {
+    let code;
+    try {
+      code = fs2.readFileSync(file, "utf8");
+    } catch {
+      continue;
+    }
+    if (!code.includes("typewind-v4") && !code.includes("from 'typewind'") && !code.includes("tw.")) continue;
+    for (const match of code.matchAll(/\.([a-zA-Z_$][a-zA-Z0-9_$]*\d[a-zA-Z0-9_$]*)/g)) {
+      usedIdentifiers.add(match[1]);
     }
   }
-  const numericFamilyNames = [...numericFamilyMax.keys()];
-  const numericProbes = numericFamilyNames.map((f) => `${f}-${numericFamilyMax.get(f) + 54321}`);
-  const numericProbeCss = ctx.candidatesToCss(numericProbes);
-  const bareNumericFamilies = numericFamilyNames.filter((_, i) => numericProbeCss[i]);
-  const classList = [...rawClassList, ...bareDefaultEntries];
+  const numericCandidates = [...usedIdentifiers].map((ident) => fmtToTailwind(ident)).filter((name) => !existingNames.has(name));
+  const numericCss = numericCandidates.length ? ctx.candidatesToCss(numericCandidates) : [];
+  const numericEntries = numericCandidates.filter((_, i) => numericCss[i]).map((name) => [name, {}]);
+  const noDocProps = new Set(numericEntries.map(([name]) => fmtToTypewind(name)));
+  const classList = [...rawClassList, ...bareDefaultEntries, ...numericEntries];
   const { standard: standardClasses } = processClassList(classList);
   const rawVariants = ctx.getVariants();
   const variantNames = rawVariants.map((v) => v.name);
@@ -632,13 +695,8 @@ async function generateTypes() {
     `@max-${size}`,
     `@min-${size}`
   ]);
-  const peerValues = rawVariants.find((v) => v.name === "peer")?.values ?? [];
-  const groupValues = rawVariants.find((v) => v.name === "group")?.values ?? [];
-  const peerGroupVariants = [
-    ...peerValues.map((v) => `peer-${v}`),
-    ...groupValues.map((v) => `group-${v}`)
-  ];
-  const variants = [.../* @__PURE__ */ new Set([...variantNames, ...containerVariants, ...peerGroupVariants])];
+  const compoundVariants = rawVariants.filter((v) => v.values?.length > 0 && v.name !== "@" && v.name !== "@max" && v.name !== "@min").flatMap((v) => v.values.map((value) => `${v.name}-${value}`));
+  const variants = [.../* @__PURE__ */ new Set([...variantNames, ...containerVariants, ...compoundVariants])];
   const opacityValues = [];
   {
     const opacitySet = /* @__PURE__ */ new Set();
@@ -659,6 +717,9 @@ async function generateTypes() {
     const css = cssResults[i];
     if (css) cssMap.set(standardClasses[i].prop, css);
   }
+  const negativeArbitraryProbes = ARBITRARY_FAMILIES.map((family) => `-${family}-[0.2px]`);
+  const negativeArbitraryCss = ctx.candidatesToCss(negativeArbitraryProbes);
+  const negativeArbitraryFamilies = ARBITRARY_FAMILIES.filter((_, i) => negativeArbitraryCss[i]);
   const typeContent = buildTypeContent(
     standardClasses,
     variants,
@@ -667,7 +728,8 @@ async function generateTypes() {
     config.showPixelEquivalents,
     config.rootFontSize,
     themeMap,
-    bareNumericFamilies
+    negativeArbitraryFamilies,
+    noDocProps
   );
   const typewindDistDir = path2.dirname(__require.resolve("typewind-v4"));
   fs2.writeFileSync(path2.join(typewindDistDir, "index.d.ts"), typeContent, "utf8");
@@ -683,12 +745,18 @@ async function generateTypes() {
   for (const [kebab, pos] of classOrderPairs) {
     if (pos !== null) kebabToOrder.set(kebab, pos);
   }
-  const classOrder = standardClasses.map(({ prop }, i) => ({ prop, order: kebabToOrder.get(twClassNames[i]) })).sort((a, b) => {
-    if (a.order === void 0 && b.order === void 0) return 0;
-    if (a.order === void 0) return 1;
-    if (b.order === void 0) return -1;
-    return a.order < b.order ? -1 : a.order > b.order ? 1 : 0;
-  }).map(({ prop }) => prop);
+  const classOrder = [
+    // `group`/`peer` have no generated CSS, so Tailwind's own getClassOrder
+    // has no opinion on where they sort — conventionally written first.
+    "is_group",
+    "is_peer",
+    ...standardClasses.map(({ prop }, i) => ({ prop, order: kebabToOrder.get(twClassNames[i]) })).sort((a, b) => {
+      if (a.order === void 0 && b.order === void 0) return 0;
+      if (a.order === void 0) return 1;
+      if (b.order === void 0) return -1;
+      return a.order < b.order ? -1 : a.order > b.order ? 1 : 0;
+    }).map(({ prop }) => prop)
+  ];
   const cssProperties = buildCssPropertyIndex(cssMap);
   const metadata = {
     variants,
