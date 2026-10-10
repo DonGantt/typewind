@@ -70,7 +70,7 @@ try {
 }
 
 const fmtToTailwind = (s: string) =>
-  s.replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
+  s.replace(/__/g, '.').replace(/_/g, '-').replace(/^\$/, '@').replace(/\$/, '/');
 
 // Tailwind's color scale only ships under the "gray" spelling. Users who
 // write "grey" (either via the typed `tw.bg_grey_500` alias generated in
@@ -113,6 +113,24 @@ export const createTw: any = () => {
             return thisTw;
           }
 
+          // `group`/`peer` are also real variant names (group(style) applies
+          // "group:" to style), so accessing them bare can't just add the
+          // plain class without breaking that — these are separate typed
+          // properties for the marker-class use case (`<div className={tw.is_group}>`).
+          if (p === 'is_group' || p === 'is_peer') {
+            t.classes.add(p === 'is_group' ? 'group' : 'peer');
+            t.prevProp = name;
+            return thisTw;
+          }
+
+          if (p === 'is_group_named' || p === 'is_peer_named') {
+            const base = p === 'is_group_named' ? 'group' : 'peer';
+            return (groupName: string) => {
+              t.classes.add(`${base}/${groupName}`);
+              return thisTw;
+            };
+          }
+
           if (name === 'raw') {
             return (style: string) => spreadModifier('', style);
           }
@@ -120,6 +138,22 @@ export const createTw: any = () => {
           if (name === 'variant') {
             return (modifier: string, classes: any) =>
               spreadModifier(`[${modifier}]:`, classes);
+          }
+
+          // "*"/"**" (direct children / all descendants) aren't valid JS
+          // identifiers, so cli.ts generates them as children(...)/descendants(...).
+          const starVariant = p === 'children' ? '*' : p === 'descendants' ? '**' : null;
+          if (starVariant) {
+            return (arg: any) => spreadModifier(`${starVariant}:`, arg);
+          }
+
+          // group-*/peer-* compound variants also accept a named form:
+          // group_hover_named('sidebar', style) -> "group-hover/sidebar:style".
+          if (p.endsWith('_named')) {
+            const baseName = fmtToTailwind(p.slice(0, -'_named'.length));
+            if (variants.has(baseName)) {
+              return (groupName: string, arg: any) => spreadModifier(`${baseName}/${groupName}:`, arg);
+            }
           }
 
           if (variants.has(name) || name === 'important') {
