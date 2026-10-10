@@ -13,7 +13,7 @@ export function loadConfig(): {
   } catch {}
   return {
     cssEntry: '',
-    showPixelEquivalents: false,
+    showPixelEquivalents: true,
     rootFontSize: 16,
     ...pkg?.typewind,
   };
