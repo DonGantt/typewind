@@ -1,6 +1,6 @@
 {
   "name": "typewind-v4",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "The safety of TypeScript with the magic of Tailwind. Supports Tailwind v4.",
   "types": "dist/index.d.ts",
   "main": "dist/index.js",
