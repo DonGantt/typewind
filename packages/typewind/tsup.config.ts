@@ -10,6 +10,7 @@ export default defineConfig({
     'src/vite.ts',
     'src/cn.ts',
     'src/runtime.ts',
+    'src/next-classes.ts',
   ],
   splitting: false,
   clean: true,
