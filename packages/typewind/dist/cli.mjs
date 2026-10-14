@@ -225,6 +225,13 @@ function normalizeToPx(value, rootFontSize) {
   if (pxMatch) return parseFloat(pxMatch[1]);
   return null;
 }
+function writeGeneratedFile(filePath, content) {
+  try {
+    fs2.unlinkSync(filePath);
+  } catch {
+  }
+  fs2.writeFileSync(filePath, content, "utf8");
+}
 function extractFirstRuleBody(css) {
   const start = css.indexOf("{");
   if (start === -1) return css;
@@ -238,27 +245,53 @@ function extractFirstRuleBody(css) {
   }
   return css.slice(start + 1);
 }
-function buildValueIndex(cssMap, themeMap, rootFontSize, families) {
+function extractDeclarationValues(body) {
+  const values = [];
+  const declRegex = /[a-zA-Z-]+\s*:\s*([^;]+);/g;
+  let match;
+  while (match = declRegex.exec(body)) {
+    values.push(match[1].trim());
+  }
+  return values;
+}
+function buildValueIndex(cssMap, themeMap, rootFontSize, families, ctx) {
   const sortedFamilies = [...families].sort((a, b) => b.length - a.length);
-  const index = {};
+  const candidates = [];
   for (const [prop, css] of cssMap) {
     const stripped = prop.startsWith("_") ? prop.slice(1) : prop;
     const family = sortedFamilies.find(
       (fam) => stripped === fam || stripped.startsWith(fam + "_")
     );
     if (!family) continue;
-    const declMatch = extractFirstRuleBody(css).match(/:\s*([^;]+);?/);
-    if (!declMatch) continue;
-    const resolved = resolveCssValue(declMatch[1].trim(), themeMap);
-    const px = normalizeToPx(resolved, rootFontSize);
-    if (px === null) continue;
-    const key = String(px);
-    index[family] ??= {};
-    const existing = index[family][key];
-    if (existing === void 0 || existing.startsWith("_") && !prop.startsWith("_")) {
-      index[family][key] = prop;
+    const body = extractFirstRuleBody(css);
+    let px = null;
+    for (const declValue of extractDeclarationValues(body)) {
+      const resolved = resolveCssValue(declValue, themeMap);
+      const candidatePx = normalizeToPx(resolved, rootFontSize);
+      if (candidatePx !== null) {
+        px = candidatePx;
+        break;
+      }
     }
+    if (px === null) continue;
+    candidates.push({ family, key: String(px), prop });
   }
+  const probeNames = candidates.map((c) => `${fmtToTailwind(c.family)}-[${c.key}px]`);
+  const probeCss = ctx.candidatesToCss(probeNames);
+  const index = {};
+  candidates.forEach((c, i) => {
+    const probe = probeCss[i];
+    if (!probe) return;
+    const expectedProps = extractCssProperties(extractFirstRuleBody(probe));
+    if (expectedProps.length === 0) return;
+    const actualProps = new Set(extractCssProperties(extractFirstRuleBody(cssMap.get(c.prop))));
+    if (!expectedProps.every((p) => actualProps.has(p))) return;
+    index[c.family] ??= {};
+    const existing = index[c.family][c.key];
+    if (existing === void 0 || existing.startsWith("_") && !c.prop.startsWith("_")) {
+      index[c.family][c.key] = c.prop;
+    }
+  });
   return index;
 }
 function extractCssProperties(css) {
@@ -732,13 +765,14 @@ async function generateTypes() {
     noDocProps
   );
   const typewindDistDir = path2.dirname(__require.resolve("typewind-v4"));
-  fs2.writeFileSync(path2.join(typewindDistDir, "index.d.ts"), typeContent, "utf8");
+  writeGeneratedFile(path2.join(typewindDistDir, "index.d.ts"), typeContent);
   const namedClassSet = classList.filter(([name]) => !/[\[\/()]/.test(name)).map(([name]) => name);
   const valueIndex = buildValueIndex(
     cssMap,
     themeMap,
     config.rootFontSize,
-    ARBITRARY_FAMILIES.map(fmtToTypewind)
+    ARBITRARY_FAMILIES.map(fmtToTypewind),
+    ctx
   );
   const classOrderPairs = ctx.getClassOrder(twClassNames);
   const kebabToOrder = /* @__PURE__ */ new Map();
@@ -757,6 +791,21 @@ async function generateTypes() {
       return a.order < b.order ? -1 : a.order > b.order ? 1 : 0;
     }).map(({ prop }) => prop)
   ];
+  const variantOrderRefUtil = "opacity-100";
+  const variantProbeNames = variants.map((v) => `${v}:${variantOrderRefUtil}`);
+  const variantProbeOrder = ctx.getClassOrder(variantProbeNames);
+  const variantTier = /* @__PURE__ */ new Map();
+  variantProbeOrder.forEach(([, pos], i) => {
+    if (pos !== null) variantTier.set(variants[i], pos);
+  });
+  const variantOrder = [...variants].sort((a, b) => {
+    const ta = variantTier.get(a);
+    const tb = variantTier.get(b);
+    if (ta === void 0 && tb === void 0) return 0;
+    if (ta === void 0) return 1;
+    if (tb === void 0) return -1;
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
   const cssProperties = buildCssPropertyIndex(cssMap);
   const metadata = {
     variants,
@@ -764,19 +813,12 @@ async function generateTypes() {
     valueIndex,
     rootFontSize: config.rootFontSize,
     classOrder,
+    variantOrder,
     cssProperties
   };
-  fs2.writeFileSync(
-    path2.join(typewindDistDir, "_metadata.json"),
-    JSON.stringify(metadata),
-    "utf8"
-  );
+  writeGeneratedFile(path2.join(typewindDistDir, "_metadata.json"), JSON.stringify(metadata));
   const sourceInlineCss = `@source inline("${namedClassSet.join(" ")}");`;
-  fs2.writeFileSync(
-    path2.join(typewindDistDir, "_typewind-source.css"),
-    sourceInlineCss,
-    "utf8"
-  );
+  writeGeneratedFile(path2.join(typewindDistDir, "_typewind-source.css"), sourceInlineCss);
   const classesFilePath = path2.join(process.cwd(), ".typewind-classes.txt");
   if (!fs2.existsSync(classesFilePath)) {
     fs2.writeFileSync(classesFilePath, "", "utf8");

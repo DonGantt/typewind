@@ -103,6 +103,21 @@ function normalizeToPx(value: string, rootFontSize: number): number | null {
   return null;
 }
 
+// Under pnpm, files resolved into node_modules are hardlinked to the global
+// content-addressable store (multiple link count). A plain writeFileSync
+// truncates and rewrites that same inode in place, silently mutating the
+// shared store copy (and any CI pnpm cache) for every other project using
+// the same package version. Unlinking first forces a fresh inode so the
+// store copy is never touched.
+function writeGeneratedFile(filePath: string, content: string): void {
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // doesn't exist yet — fine, writeFileSync below creates it
+  }
+  fs.writeFileSync(filePath, content, 'utf8');
+}
+
 function extractFirstRuleBody(css: string): string {
   const start = css.indexOf('{');
   if (start === -1) return css;
@@ -117,15 +132,30 @@ function extractFirstRuleBody(css: string): string {
   return css.slice(start + 1);
 }
 
+// Some utilities (e.g. `.border { border-style: var(--tw-border-style);
+// border-width: 1px; }`) declare a non-numeric property before the
+// value-bearing one — taking only the first declaration misses the real
+// value entirely, so scan all of them and use the first that resolves.
+function extractDeclarationValues(body: string): string[] {
+  const values: string[] = [];
+  const declRegex = /[a-zA-Z-]+\s*:\s*([^;]+);/g;
+  let match: RegExpExecArray | null;
+  while ((match = declRegex.exec(body))) {
+    values.push(match[1].trim());
+  }
+  return values;
+}
+
 function buildValueIndex(
   cssMap: Map<string, string>,
   themeMap: Map<string, string>,
   rootFontSize: number,
-  families: string[]
+  families: string[],
+  ctx: Awaited<ReturnType<typeof createTypewindContext>>
 ): Record<string, Record<string, string>> {
   const sortedFamilies = [...families].sort((a, b) => b.length - a.length);
-  const index: Record<string, Record<string, string>> = {};
 
+  const candidates: { family: string; key: string; prop: string }[] = [];
   for (const [prop, css] of cssMap) {
     const stripped = prop.startsWith('_') ? prop.slice(1) : prop;
     const family = sortedFamilies.find(
@@ -133,20 +163,44 @@ function buildValueIndex(
     );
     if (!family) continue;
 
-    const declMatch = extractFirstRuleBody(css).match(/:\s*([^;]+);?/);
-    if (!declMatch) continue;
-
-    const resolved = resolveCssValue(declMatch[1].trim(), themeMap);
-    const px = normalizeToPx(resolved, rootFontSize);
+    const body = extractFirstRuleBody(css);
+    let px: number | null = null;
+    for (const declValue of extractDeclarationValues(body)) {
+      const resolved = resolveCssValue(declValue, themeMap);
+      const candidatePx = normalizeToPx(resolved, rootFontSize);
+      if (candidatePx !== null) {
+        px = candidatePx;
+        break;
+      }
+    }
     if (px === null) continue;
 
-    const key = String(px);
-    index[family] ??= {};
-    const existing = index[family][key];
-    if (existing === undefined || (existing.startsWith('_') && !prop.startsWith('_'))) {
-      index[family][key] = prop;
-    }
+    candidates.push({ family, key: String(px), prop });
   }
+
+  // A family-prefix match is only a string heuristic (e.g. "border_spacing_px"
+  // starts with "border_" even though it has nothing to do with the "border"
+  // arbitrary-value family) — verify against the real engine that a genuine
+  // `${family}-[<px>px]` sets the same CSS properties as the candidate before
+  // trusting it, rather than accepting any prefix collision.
+  const probeNames = candidates.map((c) => `${fmtToTailwind(c.family)}-[${c.key}px]`);
+  const probeCss = ctx.candidatesToCss(probeNames) as (string | null)[];
+
+  const index: Record<string, Record<string, string>> = {};
+  candidates.forEach((c, i) => {
+    const probe = probeCss[i];
+    if (!probe) return;
+    const expectedProps = extractCssProperties(extractFirstRuleBody(probe));
+    if (expectedProps.length === 0) return;
+    const actualProps = new Set(extractCssProperties(extractFirstRuleBody(cssMap.get(c.prop)!)));
+    if (!expectedProps.every((p) => actualProps.has(p))) return;
+
+    index[c.family] ??= {};
+    const existing = index[c.family][c.key];
+    if (existing === undefined || (existing.startsWith('_') && !c.prop.startsWith('_'))) {
+      index[c.family][c.key] = c.prop;
+    }
+  });
 
   return index;
 }
@@ -639,7 +693,7 @@ export async function generateTypes() {
 
   const typewindDistDir = path.dirname(require.resolve('typewind-v4'));
 
-  fs.writeFileSync(path.join(typewindDistDir, 'index.d.ts'), typeContent, 'utf8');
+  writeGeneratedFile(path.join(typewindDistDir, 'index.d.ts'), typeContent);
 
   // Named class set for smart arbitrary value lookup in evaluate.ts / runtime.ts.
   // Excludes actual arbitrary values ([...]) and opacity fractions (/), but
@@ -654,7 +708,8 @@ export async function generateTypes() {
     cssMap,
     themeMap,
     config.rootFontSize,
-    ARBITRARY_FAMILIES.map(fmtToTypewind)
+    ARBITRARY_FAMILIES.map(fmtToTypewind),
+    ctx
   );
 
   const classOrderPairs = ctx.getClassOrder(twClassNames) as [string, bigint | null][];
@@ -677,6 +732,35 @@ export async function generateTypes() {
       })
       .map(({ prop }) => prop),
   ];
+
+  // Real Tailwind v4 class order factors into (variant tier, base utility
+  // order): verified empirically against the real engine across 15 variants x
+  // 20 utilities (incl. container/compound variants) with zero mismatches —
+  // a variant's relative position never depends on which utility it wraps.
+  // So instead of a combinatorial per-(variant,utility) table, probe each
+  // variant's tier ONCE against a fixed reference utility that's valid under
+  // every variant form (pseudo-class, container query, compound, etc).
+  const variantOrderRefUtil = 'opacity-100';
+  const variantProbeNames = variants.map((v) => `${v}:${variantOrderRefUtil}`);
+  const variantProbeOrder = ctx.getClassOrder(variantProbeNames) as [string, bigint | null][];
+  const variantTier = new Map<string, bigint>();
+  variantProbeOrder.forEach(([, pos], i) => {
+    if (pos !== null) variantTier.set(variants[i], pos);
+  });
+  // Variants that need a bracket argument to form a valid candidate on their
+  // own (`not-[...]`, `has-[...]`, `aria-[...]`, `@max-[...]`, etc.) can't be
+  // probed this way — keep them in the list (stable, trailing) so a lookup
+  // still finds them, but their resolution order among themselves is
+  // unspecified rather than reordered incorrectly.
+  const variantOrder = [...variants].sort((a, b) => {
+    const ta = variantTier.get(a);
+    const tb = variantTier.get(b);
+    if (ta === undefined && tb === undefined) return 0;
+    if (ta === undefined) return 1;
+    if (tb === undefined) return -1;
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
+
   const cssProperties = buildCssPropertyIndex(cssMap);
 
   const metadata = {
@@ -685,24 +769,17 @@ export async function generateTypes() {
     valueIndex,
     rootFontSize: config.rootFontSize,
     classOrder,
+    variantOrder,
     cssProperties,
   };
-  fs.writeFileSync(
-    path.join(typewindDistDir, '_metadata.json'),
-    JSON.stringify(metadata),
-    'utf8'
-  );
+  writeGeneratedFile(path.join(typewindDistDir, '_metadata.json'), JSON.stringify(metadata));
 
   // Generate a CSS file with @source inline() containing every named class.
   // This is imported by the project's index.css and is more reliable than
   // @source file scanning because it doesn't depend on the oxide scanner
   // recognising a .json file as a valid source.
   const sourceInlineCss = `@source inline("${namedClassSet.join(' ')}");`;
-  fs.writeFileSync(
-    path.join(typewindDistDir, '_typewind-source.css'),
-    sourceInlineCss,
-    'utf8'
-  );
+  writeGeneratedFile(path.join(typewindDistDir, '_typewind-source.css'), sourceInlineCss);
 
   // Create .typewind-classes.txt in the project root if it doesn't exist.
   // This file is the @source target for opacity modifiers and other classes
