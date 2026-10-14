@@ -69,8 +69,14 @@ export function typewindVitePlugin(): Plugin {
           // never as literal text in the source files Tailwind scans from disk.
           // So we keep any non-empty, reasonably-sized, non-numeric token and let
           // Tailwind's own oxide scanner decide what's a real utility candidate.
-          for (const match of result.code.matchAll(/"([^"\\]+)"/g)) {
-            for (const cls of match[1].split(/\s+/)) {
+          for (const match of result.code.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+            let value: string;
+            try {
+              value = JSON.parse(`"${match[1]}"`);
+            } catch {
+              continue;
+            }
+            for (const cls of value.split(/\s+/)) {
               if (cls && cls.length <= 256 && !/^-?[0-9.]+$/.test(cls)) {
                 classSet.add(cls);
               }
