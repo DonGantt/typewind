@@ -113,6 +113,57 @@ async function loadModule(id, base) {
     );
   }
 }
+function splitBareSpecifier(id) {
+  const parts = id.split("/");
+  if (id.startsWith("@")) {
+    return { pkgName: parts.slice(0, 2).join("/"), subpath: parts.slice(2).join("/") };
+  }
+  return { pkgName: parts[0], subpath: parts.slice(1).join("/") };
+}
+function findPackageDir(pkgName, base) {
+  for (const start of [base, process.cwd()]) {
+    let dir = start;
+    for (; ; ) {
+      const candidate = import_path.default.join(dir, "node_modules", pkgName);
+      if (import_fs.default.existsSync(import_path.default.join(candidate, "package.json"))) return candidate;
+      const parent = import_path.default.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
+function resolveBarePackageStylesheet(id, base) {
+  try {
+    const { pkgName, subpath } = splitBareSpecifier(id);
+    const pkgDir = findPackageDir(pkgName, base);
+    if (!pkgDir) return null;
+    const pkgJsonPath = import_path.default.join(pkgDir, "package.json");
+    const pkg = JSON.parse(import_fs.default.readFileSync(pkgJsonPath, "utf8"));
+    const exportEntry = pkg.exports?.[subpath ? `./${subpath}` : "."];
+    const candidates = [];
+    if (typeof exportEntry === "string") {
+      candidates.push(exportEntry);
+    } else if (exportEntry && typeof exportEntry === "object") {
+      if (typeof exportEntry.style === "string") candidates.push(exportEntry.style);
+      if (typeof exportEntry.default === "string") candidates.push(exportEntry.default);
+    }
+    if (subpath) {
+      candidates.push(subpath, subpath + ".css");
+    } else {
+      if (typeof pkg.style === "string") candidates.push(pkg.style);
+      if (typeof pkg.main === "string") candidates.push(pkg.main);
+    }
+    for (const rel of candidates) {
+      const full = import_path.default.resolve(pkgDir, rel);
+      if (import_fs.default.existsSync(full)) {
+        return { content: import_fs.default.readFileSync(full, "utf8"), base: import_path.default.dirname(full) };
+      }
+    }
+  } catch {
+  }
+  return null;
+}
 function makeStylesheetLoader(tailwindPkgDir) {
   return async function loadStylesheet(id, base) {
     if (id === "tailwindcss") {
@@ -147,6 +198,10 @@ function makeStylesheetLoader(tailwindPkgDir) {
           base: import_path.default.dirname(candidate)
         };
       }
+    }
+    if (!id.startsWith(".") && !import_path.default.isAbsolute(id)) {
+      const resolved = resolveBarePackageStylesheet(id, base);
+      if (resolved) return resolved;
     }
     return { content: "", base };
   };
