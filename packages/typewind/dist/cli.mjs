@@ -86,6 +86,57 @@ async function loadModule(id, base) {
     );
   }
 }
+function splitBareSpecifier(id) {
+  const parts = id.split("/");
+  if (id.startsWith("@")) {
+    return { pkgName: parts.slice(0, 2).join("/"), subpath: parts.slice(2).join("/") };
+  }
+  return { pkgName: parts[0], subpath: parts.slice(1).join("/") };
+}
+function findPackageDir(pkgName, base) {
+  for (const start of [base, process.cwd()]) {
+    let dir = start;
+    for (; ; ) {
+      const candidate = path.join(dir, "node_modules", pkgName);
+      if (fs.existsSync(path.join(candidate, "package.json"))) return candidate;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+  }
+  return null;
+}
+function resolveBarePackageStylesheet(id, base) {
+  try {
+    const { pkgName, subpath } = splitBareSpecifier(id);
+    const pkgDir = findPackageDir(pkgName, base);
+    if (!pkgDir) return null;
+    const pkgJsonPath = path.join(pkgDir, "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, "utf8"));
+    const exportEntry = pkg.exports?.[subpath ? `./${subpath}` : "."];
+    const candidates = [];
+    if (typeof exportEntry === "string") {
+      candidates.push(exportEntry);
+    } else if (exportEntry && typeof exportEntry === "object") {
+      if (typeof exportEntry.style === "string") candidates.push(exportEntry.style);
+      if (typeof exportEntry.default === "string") candidates.push(exportEntry.default);
+    }
+    if (subpath) {
+      candidates.push(subpath, subpath + ".css");
+    } else {
+      if (typeof pkg.style === "string") candidates.push(pkg.style);
+      if (typeof pkg.main === "string") candidates.push(pkg.main);
+    }
+    for (const rel of candidates) {
+      const full = path.resolve(pkgDir, rel);
+      if (fs.existsSync(full)) {
+        return { content: fs.readFileSync(full, "utf8"), base: path.dirname(full) };
+      }
+    }
+  } catch {
+  }
+  return null;
+}
 function makeStylesheetLoader(tailwindPkgDir) {
   return async function loadStylesheet(id, base) {
     if (id === "tailwindcss") {
@@ -120,6 +171,10 @@ function makeStylesheetLoader(tailwindPkgDir) {
           base: path.dirname(candidate)
         };
       }
+    }
+    if (!id.startsWith(".") && !path.isAbsolute(id)) {
+      const resolved = resolveBarePackageStylesheet(id, base);
+      if (resolved) return resolved;
     }
     return { content: "", base };
   };
