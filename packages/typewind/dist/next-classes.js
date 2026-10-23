@@ -43,6 +43,20 @@ function collectSourceFiles(dir) {
   }
   return results;
 }
+function collectStringLiterals(node, out) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectStringLiterals(item, out);
+    return;
+  }
+  const n = node;
+  if (typeof n.type !== "string") return;
+  if (n.type === "StringLiteral" && typeof n.value === "string") out.push(n.value);
+  for (const key of Object.keys(n)) {
+    if (key === "loc" || key === "start" || key === "end" || key === "range") continue;
+    collectStringLiterals(n[key], out);
+  }
+}
 function writeClassesFile(srcDir, outFile) {
   const babel = require("@babel/core");
   const classSet = /* @__PURE__ */ new Set();
@@ -64,19 +78,16 @@ function writeClassesFile(srcDir, outFile) {
         plugins: ["typewind-v4/babel"],
         parserOpts: {
           plugins: ext === "ts" || ext === "tsx" ? ["typescript", "jsx"] : ["jsx"]
-        }
+        },
+        ast: true
       });
     } catch {
       continue;
     }
-    if (!result?.code) continue;
-    for (const match of result.code.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
-      let value;
-      try {
-        value = JSON.parse(`"${match[1]}"`);
-      } catch {
-        continue;
-      }
+    if (!result?.ast) continue;
+    const strings = [];
+    collectStringLiterals(result.ast, strings);
+    for (const value of strings) {
       for (const cls of value.split(/\s+/)) {
         if (cls && cls.length <= 256 && !/^-?[0-9.]+$/.test(cls)) classSet.add(cls);
       }

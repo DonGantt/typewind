@@ -20,6 +20,28 @@ function collectSourceFiles(dir: string): string[] {
   return results;
 }
 
+// A regex scanning compiled source text for `"..."` pairs can't tell a
+// string's own quote character from a plain literal double-quote sitting
+// inside a DIFFERENTLY-quoted string (e.g. `'"'`) — one stray `"` desyncs
+// every pairing after it for the rest of the file, silently dropping every
+// real class string that follows. Reading `StringLiteral` nodes straight off
+// the already-parsed AST sidesteps the ambiguity entirely: Babel has already
+// resolved exactly where each string starts and ends.
+function collectStringLiterals(node: unknown, out: string[]): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectStringLiterals(item, out);
+    return;
+  }
+  const n = node as { type?: unknown; value?: unknown; [key: string]: unknown };
+  if (typeof n.type !== 'string') return;
+  if (n.type === 'StringLiteral' && typeof n.value === 'string') out.push(n.value);
+  for (const key of Object.keys(n)) {
+    if (key === 'loc' || key === 'start' || key === 'end' || key === 'range') continue;
+    collectStringLiterals(n[key], out);
+  }
+}
+
 function writeClassesFile(srcDir: string, outFile: string): number {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const babel = require('@babel/core') as typeof import('@babel/core');
@@ -45,19 +67,16 @@ function writeClassesFile(srcDir: string, outFile: string): number {
         parserOpts: {
           plugins: ext === 'ts' || ext === 'tsx' ? ['typescript', 'jsx'] : ['jsx'],
         },
+        ast: true,
       });
     } catch {
       continue;
     }
-    if (!result?.code) continue;
+    if (!result?.ast) continue;
 
-    for (const match of result.code.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
-      let value: string;
-      try {
-        value = JSON.parse(`"${match[1]}"`);
-      } catch {
-        continue;
-      }
+    const strings: string[] = [];
+    collectStringLiterals(result.ast, strings);
+    for (const value of strings) {
       for (const cls of value.split(/\s+/)) {
         if (cls && cls.length <= 256 && !/^-?[0-9.]+$/.test(cls)) classSet.add(cls);
       }

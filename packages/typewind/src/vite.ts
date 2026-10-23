@@ -21,8 +21,33 @@ function collectSourceFiles(dir: string): string[] {
   return results;
 }
 
+// A regex scanning compiled source text for `"..."` pairs can't tell a
+// string's own quote character from a plain literal double-quote sitting
+// inside a DIFFERENTLY-quoted string (e.g. `'"'`) — one stray `"` desyncs
+// every pairing after it for the rest of the file, silently dropping every
+// real class string that follows. Reading `StringLiteral` nodes straight off
+// the already-parsed AST sidesteps the ambiguity entirely: Babel has already
+// resolved exactly where each string starts and ends.
+function collectStringLiterals(node: unknown, out: string[]): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectStringLiterals(item, out);
+    return;
+  }
+  const n = node as { type?: unknown; value?: unknown; [key: string]: unknown };
+  if (typeof n.type !== 'string') return;
+  if (n.type === 'StringLiteral' && typeof n.value === 'string') out.push(n.value);
+  for (const key of Object.keys(n)) {
+    if (key === 'loc' || key === 'start' || key === 'end' || key === 'range') continue;
+    collectStringLiterals(n[key], out);
+  }
+}
+
 export function typewindVitePlugin(): Plugin {
-  const cache = new Map<string, { code: string; map: SourceMapPayload | null }>();
+  const cache = new Map<
+    string,
+    { code: string; map: SourceMapPayload | null; ast: unknown }
+  >();
   let projectRoot = '';
 
   function babel(code: string, id: string) {
@@ -44,11 +69,16 @@ export function typewindVitePlugin(): Plugin {
       parserOpts: {
         plugins: ext === 'ts' || ext === 'tsx' ? ['typescript', 'jsx'] : ['jsx'],
       },
+      ast: true,
     });
 
     if (!result?.code) return null;
 
-    const out = { code: result.code, map: result.map as SourceMapPayload | null };
+    const out = {
+      code: result.code,
+      map: result.map as SourceMapPayload | null,
+      ast: result.ast,
+    };
     cache.set(cacheKey, out);
     return out;
   }
@@ -59,23 +89,21 @@ export function typewindVitePlugin(): Plugin {
       try {
         const code = fs.readFileSync(file, 'utf8');
         const result = babel(code, file);
-        if (result?.code) {
-          // Extract space-separated class strings produced by the Babel transform.
-          // Tailwind v4 candidates can contain almost any character once variants
-          // (hover:, dark:, sm:, group-has-[...]:, **:), arbitrary values
-          // ([#fff], [calc(100%-2rem)]) and modifiers (!, @, /, .) are involved —
-          // a shape-based allowlist would reject exactly the resolved strings
-          // (e.g. "hover:bg-cyan-900", "text-[200px]") that only ever exist here,
-          // never as literal text in the source files Tailwind scans from disk.
-          // So we keep any non-empty, reasonably-sized, non-numeric token and let
-          // Tailwind's own oxide scanner decide what's a real utility candidate.
-          for (const match of result.code.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
-            let value: string;
-            try {
-              value = JSON.parse(`"${match[1]}"`);
-            } catch {
-              continue;
-            }
+        if (result?.ast) {
+          // Collect space-separated class strings produced by the Babel
+          // transform. Tailwind v4 candidates can contain almost any
+          // character once variants (hover:, dark:, sm:, group-has-[...]:,
+          // **:), arbitrary values ([#fff], [calc(100%-2rem)]) and modifiers
+          // (!, @, /, .) are involved — a shape-based allowlist would reject
+          // exactly the resolved strings (e.g. "hover:bg-cyan-900",
+          // "text-[200px]") that only ever exist here, never as literal text
+          // in the source files Tailwind scans from disk. So we keep any
+          // non-empty, reasonably-sized, non-numeric token and let
+          // Tailwind's own oxide scanner decide what's a real utility
+          // candidate.
+          const strings: string[] = [];
+          collectStringLiterals(result.ast, strings);
+          for (const value of strings) {
             for (const cls of value.split(/\s+/)) {
               if (cls && cls.length <= 256 && !/^-?[0-9.]+$/.test(cls)) {
                 classSet.add(cls);
@@ -128,7 +156,8 @@ export function typewindVitePlugin(): Plugin {
     transform(code, id) {
       if (!/\.(tsx?|jsx?)$/.test(id)) return null;
       if (id.includes('node_modules')) return null;
-      return babel(code, id);
+      const result = babel(code, id);
+      return result && { code: result.code, map: result.map };
     },
   };
 }
