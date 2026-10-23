@@ -25,6 +25,20 @@ function collectSourceFiles(dir) {
   }
   return results;
 }
+function collectStringLiterals(node, out) {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectStringLiterals(item, out);
+    return;
+  }
+  const n = node;
+  if (typeof n.type !== "string") return;
+  if (n.type === "StringLiteral" && typeof n.value === "string") out.push(n.value);
+  for (const key of Object.keys(n)) {
+    if (key === "loc" || key === "start" || key === "end" || key === "range") continue;
+    collectStringLiterals(n[key], out);
+  }
+}
 function typewindVitePlugin() {
   const cache = /* @__PURE__ */ new Map();
   let projectRoot = "";
@@ -42,10 +56,15 @@ function typewindVitePlugin() {
       sourceMaps: true,
       parserOpts: {
         plugins: ext === "ts" || ext === "tsx" ? ["typescript", "jsx"] : ["jsx"]
-      }
+      },
+      ast: true
     });
     if (!result?.code) return null;
-    const out = { code: result.code, map: result.map };
+    const out = {
+      code: result.code,
+      map: result.map,
+      ast: result.ast
+    };
     cache.set(cacheKey, out);
     return out;
   }
@@ -55,14 +74,10 @@ function typewindVitePlugin() {
       try {
         const code = fs.readFileSync(file, "utf8");
         const result = babel(code, file);
-        if (result?.code) {
-          for (const match of result.code.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
-            let value;
-            try {
-              value = JSON.parse(`"${match[1]}"`);
-            } catch {
-              continue;
-            }
+        if (result?.ast) {
+          const strings = [];
+          collectStringLiterals(result.ast, strings);
+          for (const value of strings) {
             for (const cls of value.split(/\s+/)) {
               if (cls && cls.length <= 256 && !/^-?[0-9.]+$/.test(cls)) {
                 classSet.add(cls);
@@ -105,7 +120,8 @@ function typewindVitePlugin() {
     transform(code, id) {
       if (!/\.(tsx?|jsx?)$/.test(id)) return null;
       if (id.includes("node_modules")) return null;
-      return babel(code, id);
+      const result = babel(code, id);
+      return result && { code: result.code, map: result.map };
     }
   };
 }
