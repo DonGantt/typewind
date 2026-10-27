@@ -5,8 +5,6 @@ import generator from '@babel/generator';
 export default function typewindBabelPlugin(): PluginObj<
   PluginPass & { classes: string[] }
 > {
-  const nodesReplaced = new Set<any>();
-
   return {
     name: 'typewind',
     pre() {
@@ -59,7 +57,6 @@ try {
         ) as { result: string };
 
         if (prevPath.node && !t.isStringLiteral(prevPath.node)) {
-          nodesReplaced.add(prevPath.node);
           try {
             prevPath.replaceWith(t.stringLiteral(result));
           } catch {}

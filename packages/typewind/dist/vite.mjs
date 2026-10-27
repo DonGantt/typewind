@@ -6,6 +6,7 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 });
 
 // src/vite.ts
+import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 var IGNORE_DIRS = /* @__PURE__ */ new Set(["node_modules", "dist", "build", ".git", ".vite", "vendor"]);
@@ -39,12 +40,16 @@ function collectStringLiterals(node, out) {
     collectStringLiterals(n[key], out);
   }
 }
+function hashSource(code) {
+  return crypto.createHash("sha1").update(code).digest("hex");
+}
 function typewindVitePlugin() {
   const cache = /* @__PURE__ */ new Map();
   let projectRoot = "";
   function babel(code, id) {
-    const cacheKey = id + ":" + code;
-    if (cache.has(cacheKey)) return cache.get(cacheKey);
+    const hash = hashSource(code);
+    const cached = cache.get(id);
+    if (cached && cached.hash === hash) return cached;
     const babelCore = __require("@babel/core");
     if (!babelCore) return null;
     const ext = id.split(".").pop() ?? "ts";
@@ -61,11 +66,12 @@ function typewindVitePlugin() {
     });
     if (!result?.code) return null;
     const out = {
+      hash,
       code: result.code,
       map: result.map,
       ast: result.ast
     };
-    cache.set(cacheKey, out);
+    cache.set(id, out);
     return out;
   }
   function writeClassesFile() {
@@ -110,6 +116,11 @@ function typewindVitePlugin() {
     // file exists by the time @tailwindcss/vite processes index.css.
     configureServer(_server) {
       if (projectRoot) writeClassesFile();
+    },
+    // A deleted (or renamed-away-from) file's cache entry would otherwise
+    // never leave the cache for the life of the dev server.
+    watchChange(id, { event }) {
+      if (event === "delete") cache.delete(id);
     },
     // Regenerate on file changes in dev mode so new classes are picked up.
     handleHotUpdate({ file }) {

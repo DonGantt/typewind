@@ -144,7 +144,6 @@ var import_eval = __toESM(require_eval());
 import { types as t } from "@babel/core";
 import generator from "@babel/generator";
 function typewindBabelPlugin() {
-  const nodesReplaced = /* @__PURE__ */ new Set();
   return {
     name: "typewind",
     pre() {
@@ -184,7 +183,6 @@ try {
           true
         );
         if (prevPath.node && !t.isStringLiteral(prevPath.node)) {
-          nodesReplaced.add(prevPath.node);
           try {
             prevPath.replaceWith(t.stringLiteral(result));
           } catch {
