@@ -1,6 +1,6 @@
 # Typewind v4 Migration Guide
 
-This guide covers migrating a project from typewind v0.3.x (Tailwind v3) to typewind v1.0.x (Tailwind v4).
+This guide covers migrating a project from `typewind` v0.3.x (Tailwind v3) to the published `typewind-v4` package (Tailwind v4). Note the package name itself changes, not just the version — `typewind-v4` is a separate npm package, currently at 0.1.x.
 
 ---
 
@@ -9,11 +9,11 @@ This guide covers migrating a project from typewind v0.3.x (Tailwind v3) to type
 | Area | v3 | v4 |
 |------|----|----|
 | Tailwind config | `tailwind.config.cjs` (JS) | CSS file with `@theme {}` |
-| Content scanning | `content.transform: typewindTransforms` | `typewind/vite` Vite plugin |
+| Content scanning | `content.transform: typewindTransforms` | `typewind-v4/vite` Vite plugin |
 | Type generation | `tailwindcss` v3 internals | `__unstable__loadDesignSystem` v4 API |
 | CSS processing | `postcss` + `tailwindcss` | `@tailwindcss/vite` |
-| SWC plugin | `typewind/swc` | Removed (use Babel via `typewind/vite`) |
-| Package version | `typewind: ^0.3.0` | `typewind: ^1.0.0` |
+| SWC plugin | `typewind/swc` | Removed (use Babel via `typewind-v4/vite`) |
+| Package | `typewind: ^0.3.0` | `typewind-v4: ^0.1.11` (new package name, not `typewind@^1.0.0`) |
 
 ---
 
@@ -28,8 +28,9 @@ pnpm remove tailwindcss autoprefixer
 # Install Tailwind v4
 pnpm add -D tailwindcss @tailwindcss/vite
 
-# Update typewind
-pnpm add typewind@^1.0.0
+# Remove the old v3 package and install the v4 package (different package name)
+pnpm remove typewind
+pnpm add typewind-v4@^0.1.11
 ```
 
 **Also install Babel for the Vite plugin:**
@@ -89,7 +90,7 @@ Replace the PostCSS-based Tailwind setup with the Vite plugin:
 import { defineConfig } from 'vite'
 import { reactRouter } from '@react-router/dev/vite'
 import tailwindcss from '@tailwindcss/vite'            // NEW
-import { typewindVitePlugin } from 'typewind/vite'     // NEW (replaces typewindTransforms)
+import { typewindVitePlugin } from 'typewind-v4/vite'  // NEW (replaces typewindTransforms)
 import tsconfigPaths from 'vite-tsconfig-paths'
 
 export default defineConfig({
@@ -193,8 +194,8 @@ tw.bg_echelon_slate$['50']  // opacity modifier → bg-echelon-slate/50
 
 **What was removed:**
 
-- `typewind/transform` — no longer needed, removed (use `typewind/vite`)
-- `typewind/swc` — removed (Vite plugin covers this use case)
+- `typewind/transform` (v3) — `typewind-v4/transform` still exists as an import (so old `tailwind.config` references don't hard-crash), but it's a deprecated no-op: it just logs a warning and exports empty placeholders. Remove it and use `typewind-v4/vite` instead.
+- `typewind/swc` (v3) — removed; there is no SWC plugin in `typewind-v4` at all, only the Babel-based Vite plugin
 
 ### 10. Update class name references
 
@@ -217,9 +218,9 @@ Your project's current state and what to change:
 
 ### Current files to update:
 
-**`package.json`** — change `tailwindcss: "^3.4.19"` → `"tailwindcss": "^4.0.0"` and add `"@tailwindcss/vite": "^4.0.0"`. Change `typewind: "^0.3.0"` → `"^1.0.0"`.
+**`package.json`** — change `tailwindcss: "^3.4.19"` → `"tailwindcss": "^4.0.0"` and add `"@tailwindcss/vite": "^4.0.0"`. Remove the `typewind` dependency entirely and add `"typewind-v4": "^0.1.11"` (different package name, not just a version bump).
 
-**`vite.config.ts`** — Remove the custom `typewindBabelPlugin` function (it's now built into `typewind/vite`). Add `tailwindcss` from `@tailwindcss/vite` and `typewindVitePlugin` from `typewind/vite`.
+**`vite.config.ts`** — Remove the custom `typewindBabelPlugin` function (it's now built into `typewind-v4/vite`). Add `tailwindcss` from `@tailwindcss/vite` and `typewindVitePlugin` from `typewind-v4/vite`.
 
 **`tailwind.config.cjs`** — Delete this file. Convert all the custom colors to `@theme {}` in your CSS entry.
 
@@ -319,7 +320,7 @@ Your project's current state and what to change:
 ```typescript
 import { reactRouter } from '@react-router/dev/vite'
 import { tailwindcss } from '@tailwindcss/vite'
-import { typewindVitePlugin } from 'typewind/vite'
+import { typewindVitePlugin } from 'typewind-v4/vite'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 import { reactRouterDevTools } from 'react-router-devtools'
 import { defineConfig } from 'vite'
