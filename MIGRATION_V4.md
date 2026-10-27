@@ -1,6 +1,6 @@
 # Typewind v4 Migration Guide
 
-This guide covers migrating a project from typewind v0.3.x (Tailwind v3) to typewind v1.0.x (Tailwind v4).
+This guide covers migrating a project from `typewind` v0.3.x (Tailwind v3) to the published `typewind-v4` package (Tailwind v4). Note the package name itself changes, not just the version — `typewind-v4` is a separate npm package, currently at 0.1.x.
 
 ---
 
@@ -9,11 +9,11 @@ This guide covers migrating a project from typewind v0.3.x (Tailwind v3) to type
 | Area | v3 | v4 |
 |------|----|----|
 | Tailwind config | `tailwind.config.cjs` (JS) | CSS file with `@theme {}` |
-| Content scanning | `content.transform: typewindTransforms` | `typewind/vite` Vite plugin |
+| Content scanning | `content.transform: typewindTransforms` | `typewind-v4/vite` Vite plugin |
 | Type generation | `tailwindcss` v3 internals | `__unstable__loadDesignSystem` v4 API |
 | CSS processing | `postcss` + `tailwindcss` | `@tailwindcss/vite` |
-| SWC plugin | `typewind/swc` | Removed (use Babel via `typewind/vite`) |
-| Package version | `typewind: ^0.3.0` | `typewind: ^1.0.0` |
+| SWC plugin | `typewind/swc` | Removed (use Babel via `typewind-v4/vite`) |
+| Package | `typewind: ^0.3.0` | `typewind-v4: ^0.1.11` (new package name, not `typewind@^1.0.0`) |
 
 ---
 
@@ -28,8 +28,9 @@ pnpm remove tailwindcss autoprefixer
 # Install Tailwind v4
 pnpm add -D tailwindcss @tailwindcss/vite
 
-# Update typewind
-pnpm add typewind@^1.0.0
+# Remove the old v3 package and install the v4 package (different package name)
+pnpm remove typewind
+pnpm add typewind-v4@^0.1.11
 ```
 
 **Also install Babel for the Vite plugin:**
@@ -89,7 +90,7 @@ Replace the PostCSS-based Tailwind setup with the Vite plugin:
 import { defineConfig } from 'vite'
 import { reactRouter } from '@react-router/dev/vite'
 import tailwindcss from '@tailwindcss/vite'            // NEW
-import { typewindVitePlugin } from 'typewind/vite'     // NEW (replaces typewindTransforms)
+import { typewindVitePlugin } from 'typewind-v4/vite'  // NEW (replaces typewindTransforms)
 import tsconfigPaths from 'vite-tsconfig-paths'
 
 export default defineConfig({
@@ -163,6 +164,19 @@ Update the generate scripts:
 
 The `typewind generate` command now reads the CSS entry file instead of `tailwind.config.cjs`.
 
+### 7a. Wire up class detection (`@source`)
+
+`typewind generate` produces two separate files for telling Tailwind which classes exist — they serve different purposes and are **not** both required:
+
+- **`node_modules/typewind-v4/dist/_typewind-source.css`** — an `@source inline(...)` safelist of *every* class your current theme can produce (tens of thousands of entries). Importing it guarantees nothing is ever missing, but it forces Tailwind to generate CSS for the full safelist regardless of actual usage — this can balloon a built stylesheet from tens of KB to several MB on a real project. Only import it if you have classes built in a way the Babel transform can't statically resolve (e.g. a fully dynamic string passed to `tw.raw(...)`, or class names assembled outside the `tw.*` DSL entirely).
+- **`.typewind-classes.txt`** (written to your project root) — the classes *actually observed* in your compiled source, kept up to date automatically by the Vite plugin / `typewind-classes` CLI on every build. This is what most projects should reference:
+  ```css
+  @source '../../.typewind-classes.txt';  /* path relative to your CSS entry file */
+  ```
+  This alone is sufficient for ordinary `tw.*` chains, including variants, opacity modifiers, and arbitrary values — they're all resolved to literal strings at build time, so the scanner sees them like any other class usage.
+
+If you only need static `tw.*` chains, skip importing `_typewind-source.css` entirely and just wire up `.typewind-classes.txt`.
+
 ### 8. Run type generation
 
 ```bash
@@ -193,8 +207,8 @@ tw.bg_echelon_slate$['50']  // opacity modifier → bg-echelon-slate/50
 
 **What was removed:**
 
-- `typewind/transform` — no longer needed, removed (use `typewind/vite`)
-- `typewind/swc` — removed (Vite plugin covers this use case)
+- `typewind/transform` (v3) — `typewind-v4/transform` still exists as an import (so old `tailwind.config` references don't hard-crash), but it's a deprecated no-op: it just logs a warning and exports empty placeholders. Remove it and use `typewind-v4/vite` instead.
+- `typewind/swc` (v3) — removed; there is no SWC plugin in `typewind-v4` at all, only the Babel-based Vite plugin
 
 ### 10. Update class name references
 
@@ -209,6 +223,15 @@ Tailwind v4 changed some class names. Common ones to watch for:
 | `border-opacity-*` | Use `border-color/opacity` modifier | e.g., `border-slate-500/50` |
 | `text-opacity-*` | Use `text-color/opacity` modifier | |
 
+**In typewind DSL chains specifically**, found migrating several real projects:
+
+| v3 chain | v4 chain | Notes |
+|----------|----------|-------|
+| `tw.bg_gradient_to_r` / `_to_br` / etc. | `tw.bg_linear_to_r` / `_to_br` / etc. | Tailwind renamed `bg-gradient-to-*` → `bg-linear-to-*` |
+| `tw.bg_opacity_50` (separate utility) | `tw.bg_color$['50']` (opacity modifier on the color itself) | `bg-opacity-*` doesn't exist in v4 — opacity is always `color$['N']` on the color utility, same pattern for `text_`/`border_`/etc. |
+| `tw.rounded` | `tw.rounded_sm` | Underscore form of the `rounded` → `rounded-sm` rename above |
+| `tw.shadow` | `tw.shadow_sm` | Underscore form of the `shadow` → `shadow-sm` rename above |
+
 ---
 
 ## echelon-pulse/echelon-frontend specific steps
@@ -217,9 +240,9 @@ Your project's current state and what to change:
 
 ### Current files to update:
 
-**`package.json`** — change `tailwindcss: "^3.4.19"` → `"tailwindcss": "^4.0.0"` and add `"@tailwindcss/vite": "^4.0.0"`. Change `typewind: "^0.3.0"` → `"^1.0.0"`.
+**`package.json`** — change `tailwindcss: "^3.4.19"` → `"tailwindcss": "^4.0.0"` and add `"@tailwindcss/vite": "^4.0.0"`. Remove the `typewind` dependency entirely and add `"typewind-v4": "^0.1.11"` (different package name, not just a version bump).
 
-**`vite.config.ts`** — Remove the custom `typewindBabelPlugin` function (it's now built into `typewind/vite`). Add `tailwindcss` from `@tailwindcss/vite` and `typewindVitePlugin` from `typewind/vite`.
+**`vite.config.ts`** — Remove the custom `typewindBabelPlugin` function (it's now built into `typewind-v4/vite`). Add `tailwindcss` from `@tailwindcss/vite` and `typewindVitePlugin` from `typewind-v4/vite`.
 
 **`tailwind.config.cjs`** — Delete this file. Convert all the custom colors to `@theme {}` in your CSS entry.
 
@@ -319,7 +342,7 @@ Your project's current state and what to change:
 ```typescript
 import { reactRouter } from '@react-router/dev/vite'
 import { tailwindcss } from '@tailwindcss/vite'
-import { typewindVitePlugin } from 'typewind/vite'
+import { typewindVitePlugin } from 'typewind-v4/vite'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 import { reactRouterDevTools } from 'react-router-devtools'
 import { defineConfig } from 'vite'
@@ -378,3 +401,12 @@ Vite should pick up CSS file changes automatically. If not, restart the dev serv
 ### Class not found in v4 that worked in v3
 
 Some class names changed between Tailwind v3 and v4. Check the [Tailwind v4 upgrade guide](https://tailwindcss.com/docs/upgrade-guide) for the full list of renamed utilities.
+
+### `pnpm install` won't pick up a brand-new `typewind-v4` release
+
+If your project's pnpm config sets `minimumReleaseAge` (a supply-chain-security setting that delays using packages for N minutes/hours after publish), a just-published `typewind-v4` version won't be installable until that window passes. Add it to `minimumReleaseAgeExclude` in your pnpm config if you need to pick up fixes immediately:
+
+```yaml
+minimumReleaseAgeExclude:
+  - typewind-v4
+```
