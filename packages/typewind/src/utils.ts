@@ -77,9 +77,26 @@ function findTailwindPkgDir(): string {
 
 async function loadModule(id: string, base: string) {
   try {
-    const resolved = require.resolve(id, { paths: [base, process.cwd()] });
+    // `require.resolve`'s `paths` option is ignored for a relative specifier
+    // (one starting with "." or "/") — Node always resolves those against the
+    // CALLING file's own location, not `base`. A `@plugin` path is relative
+    // to the CSS file that declared it (e.g. NativeWind's theme.css ships
+    // `@plugin "./dist/module/plugin.js"`), so it has to be resolved by hand.
+    const resolved =
+      id.startsWith('.') || path.isAbsolute(id)
+        ? require.resolve(path.resolve(base, id))
+        : require.resolve(id, { paths: [base, process.cwd()] });
+    // Node's CJS loader can synchronously `require()` a simple ES module and
+    // hands back `{ __esModule: true, default: <the real export> }` rather
+    // than throwing — a Tailwind plugin written as `export default plugin(...)`
+    // (NativeWind's own ships this way) resolves fine but needs unwrapping,
+    // or Tailwind calls the wrapper object itself as if it were the plugin.
     const mod = require(resolved);
-    return { module: mod, base: path.dirname(resolved) };
+    const unwrapped =
+      mod && typeof mod === 'object' && mod.__esModule && 'default' in mod
+        ? mod.default
+        : mod;
+    return { module: unwrapped, base: path.dirname(resolved) };
   } catch {
     throw new Error(
       `Typewind: Could not resolve @plugin '${id}'. Is it installed in your project?`
