@@ -77,9 +77,10 @@ function findTailwindPkgDir() {
 }
 async function loadModule(id, base) {
   try {
-    const resolved = __require.resolve(id, { paths: [base, process.cwd()] });
+    const resolved = id.startsWith(".") || path.isAbsolute(id) ? __require.resolve(path.resolve(base, id)) : __require.resolve(id, { paths: [base, process.cwd()] });
     const mod = __require(resolved);
-    return { module: mod, base: path.dirname(resolved) };
+    const unwrapped = mod && typeof mod === "object" && mod.__esModule && "default" in mod ? mod.default : mod;
+    return { module: unwrapped, base: path.dirname(resolved) };
   } catch {
     throw new Error(
       `Typewind: Could not resolve @plugin '${id}'. Is it installed in your project?`
